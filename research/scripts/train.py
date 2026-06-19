@@ -1,6 +1,6 @@
 """
 research/scripts/train.py
-WORKING VERSION: Proper training loop.
+WORKING VERSION: Proper training loop (verbose removed).
 """
 
 import os
@@ -87,9 +87,12 @@ def train_d3_model(
         lr=learning_rate,
         weight_decay=1e-4
     )
+    
+    # FIXED: Removed 'verbose=True'
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', patience=5, factor=0.5, verbose=True
+        optimizer, mode='min', patience=5, factor=0.5
     )
+    
     criterion = nn.BCEWithLogitsLoss()
     
     # Training
