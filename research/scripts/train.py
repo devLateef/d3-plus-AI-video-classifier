@@ -15,6 +15,8 @@ from torch.utils.data import DataLoader, random_split
 
 from research.data.dataset import D3Dataset
 from research.models.d3_model import D3Model
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
 
 
 def seed_everything(seed: int = 42):

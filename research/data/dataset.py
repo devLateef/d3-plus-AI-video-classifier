@@ -1,6 +1,6 @@
 """
 research/data/dataset.py
-Updated to return raw features for ablation studies.
+Fixed to return consistent number of frames (16) for all videos.
 """
 
 import os
@@ -58,8 +58,11 @@ def get_preprocessing_pipeline(aug_type: Optional[str] = None,
 class D3Dataset(Dataset):
     """
     D3 Dataset - loads from a single CSV file with labels.
-    Returns frames for D3 model + raw features for ablation.
+    Returns a FIXED number of frames (16) for all videos.
     """
+    
+    # Fixed number of frames for all samples
+    N_FRAMES = 16
     
     def __init__(
         self,
@@ -70,33 +73,45 @@ class D3Dataset(Dataset):
     ):
         super(D3Dataset, self).__init__()
         
+        # Load CSV
         self.df = pd.read_csv(csv_path).head(max_samples)
         self.trans = get_preprocessing_pipeline(aug_type, aug_quality)
         
+        # Display stats
         print(f"Loaded {len(self.df)} samples from {csv_path}")
         if 'label' in self.df.columns:
             real_count = len(self.df[self.df['label'] == 0])
             fake_count = len(self.df[self.df['label'] == 1])
             print(f"  Real: {real_count}, Fake: {fake_count}")
+        if 'generator' in self.df.columns:
+            print(f"  Generators: {self.df['generator'].unique().tolist()}")
     
     def __len__(self) -> int:
         return len(self.df)
     
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, int, Dict]:
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, int]:
         """
-        Returns frames, label, and raw features for ablation.
+        Get video frames and label.
+        
+        Returns:
+            frames: Tensor of shape (16, 3, 224, 224) - FIXED SIZE
+            label: Integer label (0=real, 1=fake)
         """
         row = self.df.iloc[idx]
         label = int(row['label'])
         frame_dir = Path(row['frame_dir'])
         
-        # Read frames
-        frames, raw_features = self._read_video_frames_with_features(frame_dir)
+        # Read video frames from directory
+        frames = self._read_video_frames(frame_dir)
         
-        return frames, label, raw_features
+        return frames, label
     
-    def _read_video_frames_with_features(self, frame_dir: Path) -> Tuple[torch.Tensor, Dict]:
-        """Read frames and extract raw features for ablation."""
+    def _read_video_frames(self, frame_dir: Path) -> torch.Tensor:
+        """
+        Read and preprocess frames from directory.
+        Returns a FIXED number of frames (16) for all videos.
+        """
+        # Get sorted frame paths
         frame_files = sorted(
             [p for p in frame_dir.iterdir() if p.suffix.lower() in ['.jpg', '.jpeg', '.png']],
             key=lambda x: get_number_from_filename(x.stem)
@@ -106,59 +121,34 @@ class D3Dataset(Dataset):
         if total_frames < 8:
             raise ValueError(f"Not enough frames in {frame_dir}: {total_frames}")
         
-        n_frames = 8 if total_frames < 16 else 16
-        indices = np.linspace(0, total_frames - 1, n_frames, dtype=int)
+        # Use FIXED number of frames (16) - sample evenly from available frames
+        # This ensures all videos have the same number of frames
+        n_frames = self.N_FRAMES
+        
+        # If we have fewer than n_frames, sample with replacement (pad)
+        # If we have more, sample without replacement
+        if total_frames < n_frames:
+            # Sample with replacement to pad
+            indices = np.random.choice(total_frames, n_frames, replace=True)
+        else:
+            # Sample evenly
+            indices = np.linspace(0, total_frames - 1, n_frames, dtype=int)
         
         frames = []
-        raw_features = {
-            'frame_count': total_frames,
-            'mean_color': [],
-            'std_color': [],
-            'frame_diffs': []
-        }
-        
-        prev_frame = None
-        
         for idx in indices:
             frame_path = frame_files[idx]
             image = cv2.imread(str(frame_path))
             if image is None:
-                continue
+                # If image fails to load, use a blank image
+                image = np.zeros((224, 224, 3), dtype=np.uint8)
             
-            # For D3 model (preprocessed)
-            image_processed = crop_center_by_percentage(image.copy(), 0.1)
-            augmented = self.trans(image=image_processed)
-            image_tensor = augmented["image"]
-            frames.append(image_tensor.transpose(2, 0, 1))
+            # Preprocess
+            image = crop_center_by_percentage(image, 0.1)
+            augmented = self.trans(image=image)
+            image = augmented["image"]
             
-            # For ablation features (raw)
-            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            
-            # Color statistics (for color features ablation)
-            for c, name in enumerate(['R', 'G', 'B']):
-                channel = image_rgb[:, :, c].flatten()
-                raw_features['mean_color'].append(np.mean(channel))
-                raw_features['std_color'].append(np.std(channel))
-            
-            # Frame differences (for temporal features ablation)
-            if prev_frame is not None:
-                diff = np.mean(np.abs(image_rgb - prev_frame))
-                raw_features['frame_diffs'].append(diff)
-            
-            prev_frame = image_rgb
+            # Add channel dimension
+            frames.append(image.transpose(2, 0, 1))
         
-        # Aggregate temporal features
-        if raw_features['frame_diffs']:
-            raw_features['mean_diff'] = np.mean(raw_features['frame_diffs'])
-            raw_features['std_diff'] = np.std(raw_features['frame_diffs'])
-            raw_features['max_diff'] = np.max(raw_features['frame_diffs'])
-        else:
-            raw_features['mean_diff'] = 0.0
-            raw_features['std_diff'] = 0.0
-            raw_features['max_diff'] = 0.0
-        
-        # Aggregate color features
-        raw_features['mean_color'] = np.mean(raw_features['mean_color'])
-        raw_features['std_color'] = np.mean(raw_features['std_color'])
-        
-        return torch.tensor(np.stack(frames), dtype=torch.float32), raw_features
+        # Stack into tensor: (16, 3, 224, 224)
+        return torch.tensor(np.stack(frames), dtype=torch.float32)
