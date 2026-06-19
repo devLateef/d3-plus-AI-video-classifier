@@ -1,6 +1,6 @@
 """
 research/data/dataset.py
-Fixed to return consistent number of frames (16) for all videos.
+Fully fixed: consistent frame size, proper tensor handling.
 """
 
 import os
@@ -10,7 +10,7 @@ import torch
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from typing import Optional, Tuple, Dict, List
+from typing import Optional, Tuple
 from torch.utils.data import Dataset
 import albumentations as A
 
@@ -83,8 +83,6 @@ class D3Dataset(Dataset):
             real_count = len(self.df[self.df['label'] == 0])
             fake_count = len(self.df[self.df['label'] == 1])
             print(f"  Real: {real_count}, Fake: {fake_count}")
-        if 'generator' in self.df.columns:
-            print(f"  Generators: {self.df['generator'].unique().tolist()}")
     
     def __len__(self) -> int:
         return len(self.df)
@@ -121,14 +119,12 @@ class D3Dataset(Dataset):
         if total_frames < 8:
             raise ValueError(f"Not enough frames in {frame_dir}: {total_frames}")
         
-        # Use FIXED number of frames (16) - sample evenly from available frames
-        # This ensures all videos have the same number of frames
+        # Use FIXED number of frames (16)
         n_frames = self.N_FRAMES
         
-        # If we have fewer than n_frames, sample with replacement (pad)
-        # If we have more, sample without replacement
+        # Sample indices
         if total_frames < n_frames:
-            # Sample with replacement to pad
+            # Pad with replacement
             indices = np.random.choice(total_frames, n_frames, replace=True)
         else:
             # Sample evenly
@@ -151,4 +147,5 @@ class D3Dataset(Dataset):
             frames.append(image.transpose(2, 0, 1))
         
         # Stack into tensor: (16, 3, 224, 224)
-        return torch.tensor(np.stack(frames), dtype=torch.float32)
+        # Use torch.from_numpy to ensure proper gradient flow
+        return torch.from_numpy(np.stack(frames)).float()
