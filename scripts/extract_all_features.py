@@ -1,7 +1,6 @@
 """
 scripts/extract_all_features_fast.py
-Extract ALL features WITHOUT training a model first.
-Uses pre-trained XCLIP for D3 features directly.
+UPDATED: Full feature extraction including bitrate.
 """
 
 import os
@@ -13,6 +12,7 @@ from pathlib import Path
 from tqdm import tqdm
 import pandas as pd
 from scipy.stats import skew, kurtosis
+import ffmpeg  # For bitrate extraction
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -49,19 +49,41 @@ def extract_temporal_features(frames):
         return np.zeros(3)
 
 
+def extract_bitrate_features(video_path):
+    """
+    Extract bitrate and metadata from the original video file.
+    
+    Returns:
+        np.array: [bitrate, frame_rate, width, height, duration, codec_encoded]
+    """
+    try:
+        probe = ffmpeg.probe(str(video_path))
+        video_info = next(s for s in probe['streams'] if s['codec_type'] == 'video')
+        format_info = probe.get('format', {})
+        
+        return np.array([
+            float(video_info.get('bit_rate', 0)),              # Bitrate
+            float(eval(video_info.get('avg_frame_rate', '0/1'))),  # Frame rate
+            float(video_info.get('width', 0)),                 # Width
+            float(video_info.get('height', 0)),                # Height
+            float(format_info.get('duration', 0)),             # Duration
+            float(video_info.get('codec_name') == 'h264')      # Codec (binary)
+        ])
+    except Exception as e:
+        print(f"Error extracting bitrate: {e}")
+        return np.zeros(6)  # Return zeros if extraction fails
+
+
 def extract_all_features_fast(csv_path, output_path="full_features.npz"):
     """
     Extract ALL features WITHOUT a trained model.
-    Uses D3 features directly from the pretrained encoder.
     """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     
-    # Load model WITHOUT loading trained weights (uses pretrained encoder)
+    # Load model WITHOUT loading trained weights
     print("Loading XCLIP model (pretrained)...")
     model = D3Model(encoder_type='XCLIP-16', loss_type='l2').to(device)
-    # Don't load any weights - just use the pretrained encoder!
-    # The encoder is already pretrained and frozen
     
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,} total")
     print(f"Trainable: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
@@ -80,26 +102,39 @@ def extract_all_features_fast(csv_path, output_path="full_features.npz"):
     all_features = []
     all_labels = []
     
+    # Get original video paths from dataset (you'll need to map this)
+    # For now, we'll use the CSV to get paths
+    df = pd.read_csv(csv_path)
+    
     with torch.no_grad():
-        for frames, label in tqdm(loader):
+        for idx, (frames, label) in enumerate(tqdm(loader)):
             frames = frames.to(device)
             
-            # 1. D3 Features (from the model - no training needed!)
+            # 1. D3 Features
             _, d3_avg, d3_std = model(frames)
             
-            # 2. Color Features (handcrafted)
+            # 2. Color Features
             frames_cpu = frames[0].cpu()
             color_feats = extract_color_features(frames_cpu)
             
-            # 3. Temporal Features (handcrafted)
+            # 3. Temporal Features
             temporal_feats = extract_temporal_features(frames_cpu)
             
-            # 4. Combine ALL features into one vector
+            # 4. Bitrate Features (NEW!)
+            # Get the video path from the dataframe
+            video_path = df.iloc[idx]['frame_dir']  # This might need adjustment
+            # Convert frame_dir to original video path
+            # This mapping depends on your structure
+            original_video_path = Path(video_path).parent.parent / "video" / f"{Path(video_path).stem}.mp4"
+            bitrate_feats = extract_bitrate_features(original_video_path)
+            
+            # 5. Combine ALL features
             combined = np.concatenate([
-                [d3_avg.cpu().numpy()[0]],
-                [d3_std.cpu().numpy()[0]],
-                color_feats,
-                temporal_feats
+                [d3_avg.cpu().numpy()[0]],      # D3 avg (1)
+                [d3_std.cpu().numpy()[0]],      # D3 std (1)
+                color_feats,                    # Color (16 frames * 12 = 192)
+                temporal_feats,                 # Temporal (3)
+                bitrate_feats                   # Bitrate (6)
             ])
             
             all_features.append(combined)
