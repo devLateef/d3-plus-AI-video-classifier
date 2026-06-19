@@ -39,7 +39,7 @@ def generate_csv_single_file(dataset_path, output_csv=None, max_frames_threshold
         output_csv = dataset_path / "csv" / "dataset.csv"
     
     # Create output directory
-    output_csv.parent.mkdir(parents=True, exist_ok=True)
+    Path(output_csv).parent.mkdir(parents=True, exist_ok=True)
     
     print(f"Generating CSV from: {frames_root}")
     print(f"Output: {output_csv}")

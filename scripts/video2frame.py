@@ -96,7 +96,7 @@ def main():
     args = parser.parse_args()
     
     dataset_path = Path(args.dataset_path)
-    
+    print(dataset_path)
     if not dataset_path.exists():
         print(f"Error: Dataset path not found: {dataset_path}")
         return
