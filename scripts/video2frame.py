@@ -108,7 +108,7 @@ def main():
     fake_dir = dataset_path / "Fake"
     
     if real_dir.exists():
-        for ext in ['*.mp4', '*.avi', '*.mov', '*.mkv']:
+        for ext in ['*.mp4', '*.avi', '*.mov', '*.mkv', '*gif']:
             video_paths.extend(real_dir.rglob(ext))
         print(f"Found {len(video_paths)} real videos in {real_dir}")
     
