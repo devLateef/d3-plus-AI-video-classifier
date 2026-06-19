@@ -1,6 +1,7 @@
 """
 scripts/extract_all_features_fast.py
 FULL VERSION: D3 + Color + Temporal + BITRATE + GIF SUPPORT
+FIXED: Proper path handling for both relative and absolute paths.
 """
 
 import os
@@ -104,46 +105,37 @@ def extract_bitrate_features_gif(gif_path):
     GIFs don't have bitrate, so we extract alternative features.
     """
     try:
-        # Get GIF info using imageio
         reader = imageio.get_reader(gif_path)
         n_frames = reader.get_length()
         
-        # Get first frame for dimensions
         first_frame = reader.get_data(0)
         height, width = first_frame.shape[:2]
         
-        # Get file size
-        file_size = os.path.getsize(gif_path) / (1024 * 1024)  # MB
+        file_size = os.path.getsize(gif_path) / (1024 * 1024)
         
-        # Get duration (if available)
         try:
             metadata = reader.get_meta_data()
-            duration = metadata.get('duration', 0) / 1000  # Convert to seconds
+            duration = metadata.get('duration', 0) / 1000
         except:
             duration = 0
         
-        # GIF features: [duration, frame_count, width, height, size_mb, is_gif]
         return np.array([
-            float(duration),      # Duration in seconds
-            float(n_frames),      # Number of frames
-            float(width),         # Width
-            float(height),        # Height
-            float(file_size),     # File size in MB
-            1.0                   # Is GIF flag
+            float(duration),
+            float(n_frames),
+            float(width),
+            float(height),
+            float(file_size),
+            1.0
         ])
         
     except Exception as e:
-        return np.array([0.0, 0.0, 0.0, 0.0, 0.0, 1.0])  # Default GIF features
+        return np.array([0.0, 0.0, 0.0, 0.0, 0.0, 1.0])
 
 
 def extract_bitrate_features(file_path):
-    """
-    Extract bitrate/metadata features from video or GIF files.
-    Auto-detects file type.
-    """
+    """Extract bitrate/metadata features from video or GIF files."""
     file_path = Path(file_path)
     
-    # Check if it's a GIF
     if file_path.suffix.lower() == '.gif':
         return extract_bitrate_features_gif(file_path)
     else:
@@ -153,36 +145,80 @@ def extract_bitrate_features(file_path):
 def find_original_file_path(frame_dir_path, dataset_root):
     """
     Find the original video/GIF file path from the frame directory path.
-    
-    Example:
-        frame_dir:  GenVideo/frames/Real/video_001/
-        video:      GenVideo/Real/video_001.mp4
+    FIXED: Handles both relative and absolute paths.
     """
     frame_dir = Path(frame_dir_path)
     dataset_root = Path(dataset_root)
     
-    # Get relative path from dataset root
-    rel_path = frame_dir.relative_to(dataset_root)
+    # Convert both to absolute paths for comparison
+    try:
+        # Try to get absolute paths
+        frame_dir_abs = frame_dir.resolve()
+        dataset_root_abs = dataset_root.resolve()
+    except Exception:
+        # If resolution fails, use as-is
+        frame_dir_abs = frame_dir
+        dataset_root_abs = dataset_root
+    
+    # Try to get relative path from dataset root
+    try:
+        # Try with absolute paths
+        rel_path = frame_dir_abs.relative_to(dataset_root_abs)
+    except ValueError:
+        try:
+            # Try with original paths (might be relative)
+            rel_path = frame_dir.relative_to(dataset_root)
+        except ValueError:
+            # If both fail, try to extract video name from the path
+            # and search in the dataset root
+            parts = frame_dir.parts
+            # Find the part that contains the video name
+            video_name = parts[-1] if parts else None
+            if video_name:
+                # Search in Real/ and Fake/ folders
+                for subfolder in ['Real', 'Fake']:
+                    subfolder_path = dataset_root / subfolder
+                    if subfolder_path.exists():
+                        for ext in ['.mp4', '.avi', '.mov', '.mkv', '.gif']:
+                            file_path = subfolder_path / f"{video_name}{ext}"
+                            if file_path.exists():
+                                return file_path
+            return None
+    
+    # Convert relative path parts to list
     parts = list(rel_path.parts)
     
-    # Remove 'frames' prefix
-    if parts[0] == 'frames':
+    # Remove 'frames' prefix if present
+    if parts and parts[0] == 'frames':
         parts = parts[1:]
     
     # video_name is the last part
+    if not parts:
+        return None
+    
     video_name = parts[-1]
+    subfolder = '/'.join(parts[:-1]) if len(parts) > 1 else ''
     
-    # The rest is the subfolder path
-    subfolder = '/'.join(parts[:-1])  # 'Real' or 'Fake/model1'
-    
-    # Check for video/GIF file with common extensions
-    video_dir = dataset_root / subfolder
+    # Check for file in dataset root with subfolder
+    if subfolder:
+        video_dir = dataset_root / subfolder
+    else:
+        video_dir = dataset_root
     
     # Check all supported formats
     for ext in ['.mp4', '.avi', '.mov', '.mkv', '.gif']:
         file_path = video_dir / f"{video_name}{ext}"
         if file_path.exists():
             return file_path
+    
+    # Fallback: try searching in Real/ and Fake/
+    for subfolder in ['Real', 'Fake']:
+        video_dir = dataset_root / subfolder
+        if video_dir.exists():
+            for ext in ['.mp4', '.avi', '.mov', '.mkv', '.gif']:
+                file_path = video_dir / f"{video_name}{ext}"
+                if file_path.exists():
+                    return file_path
     
     return None
 
@@ -194,6 +230,10 @@ def extract_all_features_fast(csv_path, dataset_root, output_path="full_features
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     print(f"Dataset root: {dataset_root}")
+    
+    # Resolve dataset root to absolute path
+    dataset_root = Path(dataset_root).resolve()
+    print(f"Resolved dataset root: {dataset_root}")
     
     # Load model
     print("Loading XCLIP model (pretrained)...")
@@ -215,6 +255,7 @@ def extract_all_features_fast(csv_path, dataset_root, output_path="full_features
     bitrate_errors = 0
     video_count = 0
     gif_count = 0
+    file_not_found = 0
     
     with torch.no_grad():
         for idx, (frames, label) in enumerate(tqdm(loader)):
@@ -237,7 +278,6 @@ def extract_all_features_fast(csv_path, dataset_root, output_path="full_features
             if original_file and original_file.exists():
                 bitrate_feats = extract_bitrate_features(original_file)
                 
-                # Count file types for reporting
                 if original_file.suffix.lower() == '.gif':
                     gif_count += 1
                 else:
@@ -245,14 +285,16 @@ def extract_all_features_fast(csv_path, dataset_root, output_path="full_features
             else:
                 bitrate_feats = np.zeros(6)
                 bitrate_errors += 1
+                if idx < 5:  # Print first few errors for debugging
+                    print(f"File not found for: {frame_dir}")
             
             # 5. Combine ALL features
             combined = np.concatenate([
-                [d3_avg.cpu().numpy()[0]],      # D3 avg (1)
-                [d3_std.cpu().numpy()[0]],      # D3 std (1)
-                color_feats,                    # Color (192)
-                temporal_feats,                 # Temporal (3)
-                bitrate_feats                   # Bitrate (6)
+                [d3_avg.cpu().numpy()[0]],
+                [d3_std.cpu().numpy()[0]],
+                color_feats,
+                temporal_feats,
+                bitrate_feats
             ])
             
             all_features.append(combined)
@@ -272,7 +314,7 @@ def extract_all_features_fast(csv_path, dataset_root, output_path="full_features
     print(f"   Feature vector length: {features_arr.shape[1]}")
     print(f"   Videos processed: {video_count}")
     print(f"   GIFs processed: {gif_count}")
-    print(f"   Bitrate errors: {bitrate_errors}/{len(dataset)}")
+    print(f"   Files not found: {bitrate_errors}/{len(dataset)}")
     
     return features_arr, labels_arr
 
