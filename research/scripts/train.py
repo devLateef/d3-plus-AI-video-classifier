@@ -1,6 +1,6 @@
 """
 research/scripts/train.py
-SIMPLIFIED AND FIXED: Proper training loop.
+WORKING VERSION: Proper training loop.
 """
 
 import os
@@ -25,9 +25,7 @@ def seed_everything(seed: int = 42):
 
 
 def collate_fn(batch):
-    """
-    Custom collate function to handle any potential issues.
-    """
+    """Stack frames and labels."""
     frames_list = []
     labels_list = []
     
@@ -35,9 +33,7 @@ def collate_fn(batch):
         frames_list.append(frames)
         labels_list.append(label)
     
-    # Stack frames (they should all be the same shape)
     frames_batch = torch.stack(frames_list)
-    
     return frames_batch, torch.tensor(labels_list, dtype=torch.float32)
 
 
@@ -53,7 +49,6 @@ def train_d3_model(
     patience: int = 10,
     max_samples: int = 9999999
 ):
-    # Device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     print(f"CSV: {csv_path}")
@@ -70,7 +65,7 @@ def train_d3_model(
         train_dataset, 
         batch_size=batch_size, 
         shuffle=True, 
-        num_workers=0,  # Set to 0 to avoid multiprocessing issues
+        num_workers=0,
         collate_fn=collate_fn
     )
     val_loader = DataLoader(
@@ -81,12 +76,12 @@ def train_d3_model(
         collate_fn=collate_fn
     )
     
-    print(f"Train samples: {len(train_dataset)}, Val samples: {len(val_dataset)}")
+    print(f"Train: {len(train_dataset)}, Val: {len(val_dataset)}")
     
     # Model
     model = D3Model(encoder_type=encoder_type, loss_type=loss_type).to(device)
     
-    # Optimizer - only trainable parameters
+    # Optimizer
     optimizer = torch.optim.AdamW(
         [p for p in model.parameters() if p.requires_grad], 
         lr=learning_rate,
@@ -95,9 +90,9 @@ def train_d3_model(
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='min', patience=5, factor=0.5, verbose=True
     )
-    criterion = nn.BCEWithLogitsLoss()  # Better for binary classification
+    criterion = nn.BCEWithLogitsLoss()
     
-    # Training loop
+    # Training
     best_val_loss = float('inf')
     patience_counter = 0
     history = {'train_loss': [], 'val_loss': [], 'train_acc': [], 'val_acc': []}
@@ -114,24 +109,18 @@ def train_d3_model(
             frames = frames.to(device)
             labels = labels.to(device)
             
-            # Forward pass
             _, _, score = model(frames)
-            
-            # Loss
             loss = criterion(score, labels)
             
-            # Backward pass
             optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             
-            # Metrics
             train_loss += loss.item()
             preds = (torch.sigmoid(score) > 0.5).float()
             train_correct += (preds == labels).sum().item()
             train_total += len(labels)
-            
             pbar.set_postfix({'loss': loss.item()})
         
         avg_train_loss = train_loss / len(train_loader)
@@ -152,8 +141,8 @@ def train_d3_model(
                 
                 _, _, score = model(frames)
                 loss = criterion(score, labels)
-                val_loss += loss.item()
                 
+                val_loss += loss.item()
                 preds = (torch.sigmoid(score) > 0.5).float()
                 val_correct += (preds == labels).sum().item()
                 val_total += len(labels)
@@ -165,10 +154,8 @@ def train_d3_model(
         
         print(f"Epoch {epoch+1}: Train Acc: {train_acc:.4f} | Val Acc: {val_acc:.4f}")
         
-        # Update learning rate
         scheduler.step(avg_val_loss)
         
-        # Save best model
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
             torch.save(model.state_dict(), model_save_path)
