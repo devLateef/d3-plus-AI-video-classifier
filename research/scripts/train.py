@@ -1,6 +1,6 @@
 """
 research/scripts/train.py
-Fixed: Proper gradient flow, error handling, and memory management.
+SIMPLIFIED AND FIXED: Proper training loop.
 """
 
 import os
@@ -27,33 +27,18 @@ def seed_everything(seed: int = 42):
 def collate_fn(batch):
     """
     Custom collate function to handle any potential issues.
-    Ensures all tensors are properly shaped.
     """
     frames_list = []
     labels_list = []
     
     for frames, label in batch:
-        # Ensure frames is a tensor
-        if not isinstance(frames, torch.Tensor):
-            frames = torch.tensor(frames)
         frames_list.append(frames)
         labels_list.append(label)
     
-    # Stack frames (they should all be the same shape now)
-    try:
-        frames_batch = torch.stack(frames_list)
-    except RuntimeError:
-        # If shapes still differ, pad to max
-        max_frames = max([f.shape[0] for f in frames_list])
-        padded = []
-        for f in frames_list:
-            if f.shape[0] < max_frames:
-                pad = torch.zeros(max_frames - f.shape[0], f.shape[1], f.shape[2], f.shape[3])
-                f = torch.cat([f, pad], dim=0)
-            padded.append(f)
-        frames_batch = torch.stack(padded)
+    # Stack frames (they should all be the same shape)
+    frames_batch = torch.stack(frames_list)
     
-    return frames_batch, torch.tensor(labels_list)
+    return frames_batch, torch.tensor(labels_list, dtype=torch.float32)
 
 
 def train_d3_model(
@@ -61,15 +46,15 @@ def train_d3_model(
     model_save_path: Path = Path("trained_models/d3_plus_model.pth"),
     encoder_type: str = 'XCLIP-16',
     loss_type: str = 'l2',
-    batch_size: int = 4,  # Reduced for memory
+    batch_size: int = 4,
     learning_rate: float = 1e-4,
     epochs: int = 50,
     val_split: float = 0.2,
     patience: int = 10,
-    max_samples: int = 9999999,
-    device: str = 'cuda'
+    max_samples: int = 9999999
 ):
-    device = torch.device(device if torch.cuda.is_available() else 'cpu')
+    # Device
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     print(f"CSV: {csv_path}")
     
@@ -85,17 +70,15 @@ def train_d3_model(
         train_dataset, 
         batch_size=batch_size, 
         shuffle=True, 
-        num_workers=2,  # Reduced to avoid memory issues
-        collate_fn=collate_fn,
-        pin_memory=True
+        num_workers=0,  # Set to 0 to avoid multiprocessing issues
+        collate_fn=collate_fn
     )
     val_loader = DataLoader(
         val_dataset, 
         batch_size=batch_size, 
         shuffle=False, 
-        num_workers=2,
-        collate_fn=collate_fn,
-        pin_memory=True
+        num_workers=0,
+        collate_fn=collate_fn
     )
     
     print(f"Train samples: {len(train_dataset)}, Val samples: {len(val_dataset)}")
@@ -103,20 +86,21 @@ def train_d3_model(
     # Model
     model = D3Model(encoder_type=encoder_type, loss_type=loss_type).to(device)
     
-    # Only train the classifier head (encoder is frozen)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', patience=5, factor=0.5
+    # Optimizer - only trainable parameters
+    optimizer = torch.optim.AdamW(
+        [p for p in model.parameters() if p.requires_grad], 
+        lr=learning_rate,
+        weight_decay=1e-4
     )
-    criterion = nn.MSELoss()
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', patience=5, factor=0.5, verbose=True
+    )
+    criterion = nn.BCEWithLogitsLoss()  # Better for binary classification
     
     # Training loop
     best_val_loss = float('inf')
     patience_counter = 0
-    history = {
-        'train_loss': [], 'val_loss': [], 
-        'train_acc': [], 'val_acc': []
-    }
+    history = {'train_loss': [], 'val_loss': [], 'train_acc': [], 'val_acc': []}
     
     for epoch in range(epochs):
         # Training
@@ -127,15 +111,14 @@ def train_d3_model(
         
         pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs} [Train]")
         for frames, labels in pbar:
-            # Move to device
             frames = frames.to(device)
-            labels = labels.float().to(device)
+            labels = labels.to(device)
             
             # Forward pass
-            _, _, scores = model(frames)
+            _, _, score = model(frames)
             
             # Loss
-            loss = criterion(scores, labels)
+            loss = criterion(score, labels)
             
             # Backward pass
             optimizer.zero_grad()
@@ -145,7 +128,7 @@ def train_d3_model(
             
             # Metrics
             train_loss += loss.item()
-            preds = (scores > 0.5).float()
+            preds = (torch.sigmoid(score) > 0.5).float()
             train_correct += (preds == labels).sum().item()
             train_total += len(labels)
             
@@ -165,13 +148,13 @@ def train_d3_model(
         with torch.no_grad():
             for frames, labels in tqdm(val_loader, desc=f"Epoch {epoch+1}/{epochs} [Val]"):
                 frames = frames.to(device)
-                labels = labels.float().to(device)
+                labels = labels.to(device)
                 
-                _, _, scores = model(frames)
-                loss = criterion(scores, labels)
+                _, _, score = model(frames)
+                loss = criterion(score, labels)
                 val_loss += loss.item()
                 
-                preds = (scores > 0.5).float()
+                preds = (torch.sigmoid(score) > 0.5).float()
                 val_correct += (preds == labels).sum().item()
                 val_total += len(labels)
         
@@ -228,6 +211,7 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--batch-size', type=int, default=4)
     parser.add_argument('--patience', type=int, default=10)
+    parser.add_argument('--max-samples', type=int, default=9999999)
     
     args = parser.parse_args()
     
@@ -238,5 +222,6 @@ if __name__ == '__main__':
         loss_type=args.loss,
         batch_size=args.batch_size,
         epochs=args.epochs,
-        patience=args.patience
+        patience=args.patience,
+        max_samples=args.max_samples
     )
