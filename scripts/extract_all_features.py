@@ -1,6 +1,6 @@
 """
 scripts/extract_all_features_fast.py
-FINAL VERSION: Proper path mapping for videos and GIFs.
+FINAL VERSION: Proper path handling for dataset root.
 """
 
 import os
@@ -136,41 +136,34 @@ def extract_bitrate_features(file_path):
 def find_original_file_path(frame_dir_path, dataset_root):
     """
     Find the original video/GIF file path from the frame directory path.
-    FIXED: Properly handles path mapping.
-    
-    Example:
-        frame_dir:  ../GenVideo/frames/Fake/Show_1/show1_664
-        video:      ../GenVideo/Fake/Show_1/show1_664.mp4
     """
     frame_dir = Path(frame_dir_path)
     dataset_root = Path(dataset_root)
     
-    # Make sure dataset_root is absolute
-    dataset_root = dataset_root.resolve()
+    # Get video name (last part of the path)
+    video_name = frame_dir.name
     
-    # Try to get absolute path of frame_dir
+    # Try to find the video file by searching
+    extensions = ['.mp4', '.avi', '.mov', '.mkv', '.gif']
+    
+    # Strategy 1: Try to match the path structure
+    # frame_dir: .../frames/Fake/Show_1/show1_664
+    # video:     .../Fake/Show_1/show1_664.mp4
+    
+    # Get the relative path from dataset root
     try:
-        frame_dir_abs = frame_dir.resolve()
-    except:
-        frame_dir_abs = frame_dir
-    
-    # Extract video name (last part of the path)
-    video_name = frame_dir_abs.name
-    
-    # Get the parent path relative to dataset root
-    try:
-        # Try to get relative path from dataset root
-        rel_path = frame_dir_abs.relative_to(dataset_root)
+        rel_path = frame_dir.relative_to(dataset_root)
         parts = list(rel_path.parts)
     except ValueError:
-        # If relative_to fails, try to extract subfolder from the path
-        parts = list(frame_dir_abs.parts)
-        # Find where 'frames' is in the path
-        try:
-            frames_idx = parts.index('frames')
-            parts = parts[frames_idx + 1:]  # Skip 'frames'
-        except ValueError:
-            parts = []
+        # Try to find 'Real' or 'Fake' in the path
+        parts = list(frame_dir.parts)
+        # Find where 'Real' or 'Fake' appears
+        base_folder = None
+        for i, part in enumerate(parts):
+            if part in ['Real', 'Fake']:
+                base_folder = part
+                parts = parts[i+1:]  # Everything after Real/Fake
+                break
     
     # Remove 'frames' prefix if present
     if parts and parts[0] == 'frames':
@@ -178,56 +171,54 @@ def find_original_file_path(frame_dir_path, dataset_root):
     
     # If we have parts, reconstruct the subfolder
     if parts:
-        # The last part is the video_name, the rest is the subfolder
         subfolder_parts = parts[:-1]  # Everything except the video name
         subfolder = '/'.join(subfolder_parts) if subfolder_parts else ''
     else:
         subfolder = ''
     
-    # Determine the base folder (Real or Fake)
-    # Look for Real or Fake in the path
+    # Determine base folder
     base_folder = None
     for folder in ['Real', 'Fake']:
-        if folder in str(frame_dir_abs):
+        if folder in str(frame_dir):
             base_folder = folder
             break
     
-    # Construct the video directory path
+    # Search paths
+    search_paths = []
+    
+    # Path 1: dataset_root / base_folder / subfolder / video_name.ext
     if base_folder:
         if subfolder:
-            video_dir = dataset_root / base_folder / subfolder
-        else:
-            video_dir = dataset_root / base_folder
-    else:
-        if subfolder:
-            video_dir = dataset_root / subfolder
-        else:
-            video_dir = dataset_root
+            search_paths.append(dataset_root / base_folder / subfolder)
+        search_paths.append(dataset_root / base_folder)
     
-    # Check for the original file with various extensions
-    extensions = ['.mp4', '.avi', '.mov', '.mkv', '.gif']
+    # Path 2: dataset_root / subfolder
+    if subfolder:
+        search_paths.append(dataset_root / subfolder)
     
-    for ext in extensions:
-        # Try the constructed path
-        file_path = video_dir / f"{video_name}{ext}"
-        if file_path.exists():
-            return file_path
-        
-        # Also try without subfolder (in case the video is directly in base folder)
-        if base_folder:
-            file_path = dataset_root / base_folder / f"{video_name}{ext}"
+    # Path 3: dataset_root / base_folder
+    if base_folder:
+        search_paths.append(dataset_root / base_folder)
+    
+    # Path 4: dataset_root only
+    search_paths.append(dataset_root)
+    
+    # Try all paths and extensions
+    for search_path in search_paths:
+        for ext in extensions:
+            file_path = search_path / f"{video_name}{ext}"
             if file_path.exists():
                 return file_path
-        
-        # If the video name has underscores, try variations
-        # Sometimes video names might have different formatting
-        if '_' in video_name:
-            # Try with first part only
-            first_part = video_name.split('_')[0]
-            for ext2 in extensions:
-                file_path = video_dir / f"{first_part}{ext2}"
-                if file_path.exists():
-                    return file_path
+    
+    # Additional fallback: search recursively in Real and Fake
+    for folder in ['Real', 'Fake']:
+        folder_path = dataset_root / folder
+        if folder_path.exists():
+            for ext in extensions:
+                # Search for the video file anywhere in the folder
+                matches = list(folder_path.rglob(f"{video_name}{ext}"))
+                if matches:
+                    return matches[0]
     
     return None
 
@@ -240,20 +231,36 @@ def extract_all_features_fast(csv_path, dataset_root, output_path="full_features
     print(f"Using device: {device}")
     print(f"Dataset root: {dataset_root}")
     
-    # Resolve dataset root to absolute path
+    # Resolve dataset root
     dataset_root = Path(dataset_root).resolve()
     print(f"Resolved dataset root: {dataset_root}")
     
     # Check if Real and Fake folders exist
     real_path = dataset_root / 'Real'
     fake_path = dataset_root / 'Fake'
+    
     if not real_path.exists() and not fake_path.exists():
         print(f"❌ ERROR: No 'Real' or 'Fake' folders found in {dataset_root}")
-        print("Please check your dataset path.")
-        return
+        print(f"   Real path: {real_path}")
+        print(f"   Fake path: {fake_path}")
+        print("\nPlease check your dataset path.")
+        
+        # Try to find the dataset by searching in parent directories
+        parent = dataset_root.parent
+        for _ in range(3):  # Search up to 3 levels up
+            if (parent / 'Real').exists() and (parent / 'Fake').exists():
+                print(f"✅ Found dataset in: {parent}")
+                dataset_root = parent
+                real_path = dataset_root / 'Real'
+                fake_path = dataset_root / 'Fake'
+                break
+            parent = parent.parent
+        
+        if not real_path.exists() and not fake_path.exists():
+            return
     
-    print(f"Real folder: {real_path.exists()}")
-    print(f"Fake folder: {fake_path.exists()}")
+    print(f"Real folder: {real_path}")
+    print(f"Fake folder: {fake_path}")
     
     # Load model
     print("Loading XCLIP model (pretrained)...")
@@ -304,7 +311,7 @@ def extract_all_features_fast(csv_path, dataset_root, output_path="full_features
             else:
                 bitrate_feats = np.zeros(6)
                 bitrate_errors += 1
-                if idx < 5:  # Print first few errors for debugging
+                if idx < 5:
                     print(f"File not found for: {frame_dir}")
             
             # 5. Combine ALL features
