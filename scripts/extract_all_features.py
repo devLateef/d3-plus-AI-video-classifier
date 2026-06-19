@@ -1,12 +1,11 @@
 """
-scripts/extract_all_features.py
-Extract ALL features once and save to disk.
-Run this once, then the training will be fast.
+scripts/extract_all_features_fast.py
+Extract ALL features WITHOUT training a model first.
+Uses pre-trained XCLIP for D3 features directly.
 """
 
 import os
 import sys
-import json
 import numpy as np
 import torch
 import cv2
@@ -23,9 +22,7 @@ from research.models.d3_model import D3Model
 
 
 def extract_color_features(frames):
-    """
-    Extract color features (mean, std, skew, kurtosis) from frames.
-    """
+    """Extract color features (mean, std, skew, kurtosis) from frames."""
     color_features = []
     for frame in frames:
         for c in range(3):
@@ -40,9 +37,7 @@ def extract_color_features(frames):
 
 
 def extract_temporal_features(frames):
-    """
-    Extract temporal features (mean diff, std diff, max diff).
-    """
+    """Extract temporal features (mean diff, std diff, max diff)."""
     diffs = []
     for i in range(1, len(frames)):
         diff = torch.abs(frames[i] - frames[i-1]).mean().item()
@@ -54,37 +49,46 @@ def extract_temporal_features(frames):
         return np.zeros(3)
 
 
-def extract_all_features(csv_path, model_path, output_path="full_features.npz"):
+def extract_all_features_fast(csv_path, output_path="full_features.npz"):
     """
-    Extract all features from all videos and save to compressed numpy file.
+    Extract ALL features WITHOUT a trained model.
+    Uses D3 features directly from the pretrained encoder.
     """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     
-    # Load model for D3 features
+    # Load model WITHOUT loading trained weights (uses pretrained encoder)
+    print("Loading XCLIP model (pretrained)...")
     model = D3Model(encoder_type='XCLIP-16', loss_type='l2').to(device)
-    model.load_state_dict(torch.load(model_path, map_location=device))
-    model.eval()
+    # Don't load any weights - just use the pretrained encoder!
+    # The encoder is already pretrained and frozen
+    
+    print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,} total")
+    print(f"Trainable: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
     
     # Load dataset
     dataset = D3Dataset(csv_path)
-    loader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, num_workers=2)
+    loader = torch.utils.data.DataLoader(
+        dataset, 
+        batch_size=1, 
+        shuffle=False, 
+        num_workers=2
+    )
     
     print(f"Processing {len(dataset)} videos...")
     
     all_features = []
     all_labels = []
-    all_video_ids = []
     
     with torch.no_grad():
         for frames, label in tqdm(loader):
             frames = frames.to(device)
             
-            # 1. D3 Features (from the model)
+            # 1. D3 Features (from the model - no training needed!)
             _, d3_avg, d3_std = model(frames)
             
             # 2. Color Features (handcrafted)
-            frames_cpu = frames[0].cpu()  # Remove batch dimension
+            frames_cpu = frames[0].cpu()
             color_feats = extract_color_features(frames_cpu)
             
             # 3. Temporal Features (handcrafted)
@@ -92,14 +96,14 @@ def extract_all_features(csv_path, model_path, output_path="full_features.npz"):
             
             # 4. Combine ALL features into one vector
             combined = np.concatenate([
-                [d3_avg.cpu().numpy()[0]],      # Scalar 1
-                [d3_std.cpu().numpy()[0]],      # Scalar 2
-                color_feats,                    # ~N frames * 12 features
-                temporal_feats                  # 3 features
+                [d3_avg.cpu().numpy()[0]],
+                [d3_std.cpu().numpy()[0]],
+                color_feats,
+                temporal_feats
             ])
             
             all_features.append(combined)
-            all_labels.append(label.numpy())
+            all_labels.append(label.numpy()[0])
     
     # Save
     features_arr = np.array(all_features)
@@ -123,15 +127,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--csv', type=str, required=True,
                        help='Path to dataset.csv')
-    parser.add_argument('--model', type=str, required=True,
-                       help='Path to trained D3 model (.pth)')
     parser.add_argument('--output', type=str, default='full_features.npz',
                        help='Output path for features')
     
     args = parser.parse_args()
     
-    extract_all_features(
+    extract_all_features_fast(
         csv_path=args.csv,
-        model_path=args.model,
         output_path=args.output
     )
