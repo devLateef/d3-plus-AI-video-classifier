@@ -1,6 +1,6 @@
 """
-shared/video2frame.py
-Extract frames from videos while preserving folder structure.
+scripts/video2frame.py
+Extract frames from videos - Updated for Real/Fake folder structure.
 """
 
 import os
@@ -29,14 +29,15 @@ def process_video(video_path, dataset_path):
     video_path = Path(video_path)
     dataset_path = Path(dataset_path)
     
-    # Get relative path from dataset root
-    rel_path = video_path.relative_to(dataset_path / "video")
+    # Get relative path from dataset root (preserves Real/Fake structure)
+    rel_path = video_path.relative_to(dataset_path)
     
     # Remove file extension for folder name
     video_name = video_path.stem
     
     # Create frame directory path
-    # This preserves subfolder structure (e.g., fake/model1/video1)
+    # Example: GenVideo/Real/video1.mp4 → GenVideo/frames/Real/video1/
+    #          GenVideo/Fake/model1/video2.mp4 → GenVideo/frames/Fake/model1/video2/
     frame_dir = dataset_path / "frames" / rel_path.parent / video_name
     
     # Check if frames already exist
@@ -44,7 +45,7 @@ def process_video(video_path, dataset_path):
         print(f"✓ {video_name} frames exist")
         return
     
-    print(f"Processing: {video_path.relative_to(dataset_path)}")
+    print(f"Processing: {rel_path}")
     
     try:
         # Get video duration
@@ -95,18 +96,42 @@ def main():
     args = parser.parse_args()
     
     dataset_path = Path(args.dataset_path)
-    video_dir = dataset_path / "video"
     
-    if not video_dir.exists():
-        print(f"Error: Video directory not found: {video_dir}")
+    if not dataset_path.exists():
+        print(f"Error: Dataset path not found: {dataset_path}")
         return
     
-    # Find all video files (recursively to handle subfolders)
+    # Find all video files in Real/ and Fake/ folders
     video_paths = []
-    for ext in ['*.mp4', '*.avi', '*.mov', '*.mkv']:
-        video_paths.extend(video_dir.rglob(ext))
     
-    print(f"Found {len(video_paths)} videos!")
+    real_dir = dataset_path / "Real"
+    fake_dir = dataset_path / "Fake"
+    
+    if real_dir.exists():
+        for ext in ['*.mp4', '*.avi', '*.mov', '*.mkv']:
+            video_paths.extend(real_dir.rglob(ext))
+        print(f"Found {len(video_paths)} real videos in {real_dir}")
+    
+    if fake_dir.exists():
+        for ext in ['*.mp4', '*.avi', '*.mov', '*.mkv']:
+            video_paths.extend(fake_dir.rglob(ext))
+        print(f"Found {len([p for p in video_paths if 'Fake' in str(p)])} fake videos in {fake_dir}")
+    
+    total_before = len(video_paths)
+    
+    # Also check if there are videos directly in Real/ and Fake/ (not in subfolders)
+    if real_dir.exists():
+        for ext in ['*.mp4', '*.avi', '*.mov', '*.mkv']:
+            video_paths.extend(real_dir.glob(ext))
+    
+    if fake_dir.exists():
+        for ext in ['*.mp4', '*.avi', '*.mov', '*.mkv']:
+            video_paths.extend(fake_dir.glob(ext))
+    
+    # Remove duplicates
+    video_paths = list(set(video_paths))
+    
+    print(f"Found {len(video_paths)} total videos!")
     
     # Process in parallel
     args_list = [(vp, dataset_path) for vp in video_paths]

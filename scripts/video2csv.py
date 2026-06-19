@@ -1,6 +1,6 @@
 """
-shared/video2csv.py
-Create a single CSV with paths to frames and labels.
+scripts/video2csv.py
+Create a single CSV with labels - Updated for Real/Fake folder structure.
 """
 
 import os
@@ -47,7 +47,7 @@ def generate_csv_single_file(dataset_path, output_csv=None, max_frames_threshold
     data = []
     
     # Iterate through all video frame directories
-    # Structure: frames/real/video1/ or frames/fake/model1/video1/
+    # Structure: frames/Real/video1/ or frames/Fake/model1/video1/
     for video_dir in tqdm(list(frames_root.rglob('*')), desc="Scanning directories"):
         if not video_dir.is_dir():
             continue
@@ -61,19 +61,26 @@ def generate_csv_single_file(dataset_path, output_csv=None, max_frames_threshold
         rel_path = video_dir.relative_to(frames_root)
         path_parts = rel_path.parts
         
-        # Determine if real or fake
-        if 'real' in path_parts[0].lower():
+        # Check if path starts with 'Real' or 'Fake'
+        if len(path_parts) > 0 and path_parts[0].lower() == 'real':
             label = 0
             generator = 'real'
-            video_id = '_'.join(path_parts)
-        else:
+            video_id = '_'.join(path_parts[1:])  # Skip 'Real'
+        elif len(path_parts) > 0 and path_parts[0].lower() == 'fake':
             label = 1
-            # Generator is the second part (e.g., fake/model1/video1 → model1)
-            if len(path_parts) >= 2:
-                generator = path_parts[1]
+            # generator is the subfolder (model name)
+            generator = path_parts[1] if len(path_parts) >= 2 else 'unknown'
+            video_id = '_'.join(path_parts[1:])  # Skip 'Fake'
+        else:
+            # Fallback: try to detect from parent folder
+            # If we can't detect, assume fake (conservative approach)
+            if any('real' in part.lower() for part in path_parts):
+                label = 0
+                generator = 'real'
             else:
-                generator = 'unknown'
-            video_id = '_'.join(path_parts[1:])  # Skip 'fake'
+                label = 1
+                generator = path_parts[0] if len(path_parts) > 0 else 'unknown'
+            video_id = '_'.join(path_parts)
         
         # Count frames
         frame_count = len(frame_files)
