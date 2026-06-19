@@ -1,6 +1,6 @@
 """
 research/models/d3_model.py
-SIMPLIFIED WORKING VERSION: Proper gradient flow.
+FIXED: Proper classifier input size matching combined features.
 """
 
 import torch
@@ -59,28 +59,18 @@ class D3Model(nn.Module):
         for param in self.encoder.parameters():
             param.requires_grad = False
         
-        # Trainable classifier
-        # Get feature dimension from encoder
-        with torch.no_grad():
-            dummy = torch.zeros(1, 3, 224, 224)
-            if encoder_type in ['CLIP-16', 'CLIP-32', 'XCLIP-16', 'XCLIP-32']:
-                feat_dim = 768
-            elif encoder_type in ['DINO-base', 'DINO-large']:
-                feat_dim = 768
-            elif 'ResNet' in encoder_type:
-                feat_dim = 512
-            else:
-                feat_dim = 512
-        
-        # Simple trainable head
+        # ============================================================
+        # FIXED: Classifier for combined features (batch, 2)
+        # ============================================================
+        # combined = [dis_2nd_avg, dis_2nd_std] -> shape (batch, 2)
         self.classifier = nn.Sequential(
-            nn.Linear(feat_dim * 2, 256),  # *2 for avg and std
+            nn.Linear(2, 32),      # Input: 2 features from D3
             nn.ReLU(),
             nn.Dropout(0.3),
-            nn.Linear(256, 64),
+            nn.Linear(32, 16),
             nn.ReLU(),
             nn.Dropout(0.3),
-            nn.Linear(64, 1)
+            nn.Linear(16, 1)       # Output: single score
         )
         
         total_params = sum(p.numel() for p in self.parameters())
@@ -92,7 +82,7 @@ class D3Model(nn.Module):
         Forward pass with proper gradient flow.
         
         Returns:
-            features: Frame features
+            features: Frame features (for analysis)
             dis_2nd_avg: Average difference (for analysis)
             score: Prediction score (trainable)
         """
@@ -141,8 +131,10 @@ class D3Model(nn.Module):
         dis_2nd_avg = torch.mean(dis_2nd, dim=1)
         dis_2nd_std = torch.std(dis_2nd, dim=1)
         
-        # Stack and classify
+        # Stack as (batch, 2) - THIS IS THE CORRECT SHAPE
         combined = torch.stack([dis_2nd_avg, dis_2nd_std], dim=1)
+        
+        # Classify
         score = self.classifier(combined).squeeze(1)
         
         return features, dis_2nd_avg, score
