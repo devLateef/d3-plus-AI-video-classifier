@@ -31,14 +31,14 @@ def check_model():
     return False
 
 def check_folders():
-    required = ["tmp", "results", "reports"]
+    required = ["tmp", "results", "results/reports"]
     missing = [f for f in required if not Path(f).exists()]
     if missing:
         print(f"Missing folders: {missing}")
         return False
     return True
 
-print("🔍 D3+ Setup Verification")
+print("D3+ Setup Verification")
 print("="*40)
 
 print(f"FFmpeg: {'✅' if check_ffmpeg() else '❌ (Install ffmpeg)'}")

@@ -10,7 +10,7 @@ import argparse
 import multiprocessing
 from glob import glob
 from pathlib import Path
-from moviepy.editor import VideoFileClip
+from moviepy import VideoFileClip
 
 
 def get_video_length(file_path):

@@ -7,6 +7,7 @@ import torch
 import numpy as np
 from pathlib import Path
 from tqdm import tqdm
+from typing import Optional
 from sklearn.metrics import average_precision_score, accuracy_score, roc_auc_score
 
 from research.data.dataset import D3Dataset
