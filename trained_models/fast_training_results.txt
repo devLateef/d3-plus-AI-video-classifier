@@ -1,0 +1,11 @@
+D3+ Feature Extraction Results
+==================================================
+Total samples: 18574
+Features per sample: 203
+Real: 10000, Fake: 8574
+
+Random Forest Test Accuracy: 1.0000
+SVM Test Accuracy: 0.9984
+Logistic Regression Test Accuracy: 0.9992
+
+Best Model: RF (1.0000)

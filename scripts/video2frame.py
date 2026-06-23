@@ -108,12 +108,12 @@ def main():
     fake_dir = dataset_path / "Fake"
     
     if real_dir.exists():
-        for ext in ['*.mp4', '*.avi', '*.mov', '*.mkv', '*gif']:
+        for ext in ['*.mp4', '*.avi', '*.mov', '*.mkv', '*.gif']:  
             video_paths.extend(real_dir.rglob(ext))
         print(f"Found {len(video_paths)} real videos in {real_dir}")
     
     if fake_dir.exists():
-        for ext in ['*.mp4', '*.avi', '*.mov', '*.mkv']:
+        for ext in ['*.mp4', '*.avi', '*.mov', '*.mkv', '*.gif']:  
             video_paths.extend(fake_dir.rglob(ext))
         print(f"Found {len([p for p in video_paths if 'Fake' in str(p)])} fake videos in {fake_dir}")
     
@@ -121,11 +121,11 @@ def main():
     
     # Also check if there are videos directly in Real/ and Fake/ (not in subfolders)
     if real_dir.exists():
-        for ext in ['*.mp4', '*.avi', '*.mov', '*.mkv']:
+        for ext in ['*.mp4', '*.avi', '*.mov', '*.mkv', '*.gif']:  
             video_paths.extend(real_dir.glob(ext))
     
     if fake_dir.exists():
-        for ext in ['*.mp4', '*.avi', '*.mov', '*.mkv']:
+        for ext in ['*.mp4', '*.avi', '*.mov', '*.mkv', '*.gif']: 
             video_paths.extend(fake_dir.glob(ext))
     
     # Remove duplicates

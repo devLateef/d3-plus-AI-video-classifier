@@ -1,0 +1,126 @@
+../GenVideo/Fake/WildScrape/D408.gif error: Error passing `ffmpeg -i` command output:
+
+Input #0, gif, from '../GenVideo/Fake/WildScrape/D408.gif':
+  Duration: N/A, start: 0.000000, bitrate: N/A
+  Stream #0:0: Video: gif, bgra, 512x320, 10 tbr, 100 tbn
+At least one output file must be specified
+
+../GenVideo/Fake/WildScrape/D400.gif error: Error passing `ffmpeg -i` command output:
+
+Input #0, gif, from '../GenVideo/Fake/WildScrape/D400.gif':
+  Duration: N/A, start: 0.000000, bitrate: N/A
+  Stream #0:0: Video: gif, bgra, 512x320, 10 tbr, 100 tbn
+At least one output file must be specified
+
+../GenVideo/Fake/WildScrape/D407.gif error: Error passing `ffmpeg -i` command output:
+
+Input #0, gif, from '../GenVideo/Fake/WildScrape/D407.gif':
+  Duration: N/A, start: 0.000000, bitrate: N/A
+  Stream #0:0: Video: gif, bgra, 512x320, 10 tbr, 100 tbn
+At least one output file must be specified
+
+../GenVideo/Fake/WildScrape/D406.gif error: Error passing `ffmpeg -i` command output:
+
+Input #0, gif, from '../GenVideo/Fake/WildScrape/D406.gif':
+  Duration: N/A, start: 0.000000, bitrate: N/A
+  Stream #0:0: Video: gif, bgra, 512x320, 10 tbr, 100 tbn
+At least one output file must be specified
+
+../GenVideo/Fake/WildScrape/D404.gif error: Error passing `ffmpeg -i` command output:
+
+Input #0, gif, from '../GenVideo/Fake/WildScrape/D404.gif':
+  Duration: N/A, start: 0.000000, bitrate: N/A
+  Stream #0:0: Video: gif, bgra, 512x320, 10 tbr, 100 tbn
+At least one output file must be specified
+
+../GenVideo/Fake/WildScrape/D575.gif error: Error passing `ffmpeg -i` command output:
+
+Input #0, gif, from '../GenVideo/Fake/WildScrape/D575.gif':
+  Duration: N/A, start: 0.000000, bitrate: N/A
+  Stream #0:0: Video: gif, bgra, 512x320, 10 tbr, 100 tbn
+At least one output file must be specified
+
+../GenVideo/Fake/WildScrape/D405.gif error: Error passing `ffmpeg -i` command output:
+
+Input #0, gif, from '../GenVideo/Fake/WildScrape/D405.gif':
+  Duration: N/A, start: 0.000000, bitrate: N/A
+  Stream #0:0: Video: gif, bgra, 512x320, 10 tbr, 100 tbn
+At least one output file must be specified
+
+../GenVideo/Fake/WildScrape/D403.gif error: Error passing `ffmpeg -i` command output:
+
+Input #0, gif, from '../GenVideo/Fake/WildScrape/D403.gif':
+  Duration: N/A, start: 0.000000, bitrate: N/A
+  Stream #0:0: Video: gif, bgra, 512x320, 10 tbr, 100 tbn
+At least one output file must be specified
+
+../GenVideo/Fake/WildScrape/D414.gif error: Error passing `ffmpeg -i` command output:
+
+Input #0, gif, from '../GenVideo/Fake/WildScrape/D414.gif':
+  Duration: N/A, start: 0.000000, bitrate: N/A
+  Stream #0:0: Video: gif, bgra, 512x320, 10 tbr, 100 tbn
+At least one output file must be specified
+
+../GenVideo/Fake/WildScrape/D411.gif error: Error passing `ffmpeg -i` command output:
+
+Input #0, gif, from '../GenVideo/Fake/WildScrape/D411.gif':
+  Duration: N/A, start: 0.000000, bitrate: N/A
+  Stream #0:0: Video: gif, bgra, 512x320, 10 tbr, 100 tbn
+At least one output file must be specified
+
+../GenVideo/Fake/WildScrape/D401.gif error: Error passing `ffmpeg -i` command output:
+
+Input #0, gif, from '../GenVideo/Fake/WildScrape/D401.gif':
+  Duration: N/A, start: 0.000000, bitrate: N/A
+  Stream #0:0: Video: gif, bgra, 512x320, 10 tbr, 100 tbn
+At least one output file must be specified
+
+../GenVideo/Fake/WildScrape/D413.gif error: Error passing `ffmpeg -i` command output:
+
+Input #0, gif, from '../GenVideo/Fake/WildScrape/D413.gif':
+  Duration: N/A, start: 0.000000, bitrate: N/A
+  Stream #0:0: Video: gif, bgra, 512x320, 10 tbr, 100 tbn
+At least one output file must be specified
+
+../GenVideo/Fake/WildScrape/D410.gif error: Error passing `ffmpeg -i` command output:
+
+Input #0, gif, from '../GenVideo/Fake/WildScrape/D410.gif':
+  Duration: N/A, start: 0.000000, bitrate: N/A
+  Stream #0:0: Video: gif, bgra, 512x320, 10 tbr, 100 tbn
+At least one output file must be specified
+
+../GenVideo/Fake/WildScrape/D402.gif error: Error passing `ffmpeg -i` command output:
+
+Input #0, gif, from '../GenVideo/Fake/WildScrape/D402.gif':
+  Duration: N/A, start: 0.000000, bitrate: N/A
+  Stream #0:0: Video: gif, bgra, 512x320, 10 tbr, 100 tbn
+At least one output file must be specified
+
+../GenVideo/Fake/WildScrape/D409.gif error: Error passing `ffmpeg -i` command output:
+
+Input #0, gif, from '../GenVideo/Fake/WildScrape/D409.gif':
+  Duration: N/A, start: 0.000000, bitrate: N/A
+  Stream #0:0: Video: gif, bgra, 512x320, 10 tbr, 100 tbn
+At least one output file must be specified
+
+../GenVideo/Fake/WildScrape/D412.gif error: Error passing `ffmpeg -i` command output:
+
+Input #0, gif, from '../GenVideo/Fake/WildScrape/D412.gif':
+  Duration: N/A, start: 0.000000, bitrate: N/A
+  Stream #0:0: Video: gif, bgra, 512x320, 10 tbr, 100 tbn
+At least one output file must be specified
+
+../GenVideo/Fake/WildScrape/D318.gif error: Error passing `ffmpeg -i` command output:
+
+Input #0, gif, from '../GenVideo/Fake/WildScrape/D318.gif':
+  Duration: N/A, start: 0.000000, bitrate: N/A
+  Stream #0:0: Video: gif, bgra, 512x320, 10 tbr, 100 tbn
+At least one output file must be specified
+
+../GenVideo/Fake/WildScrape/D415.gif error: Error passing `ffmpeg -i` command output:
+
+Input #0, gif, from '../GenVideo/Fake/WildScrape/D415.gif':
+  Duration: N/A, start: 0.000000, bitrate: N/A
+  Stream #0:0: Video: gif, bgra, 512x320, 10 tbr, 100 tbn
+At least one output file must be specified
+

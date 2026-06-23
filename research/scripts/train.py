@@ -1,217 +1,254 @@
 """
-research/scripts/train.py
-WORKING VERSION: Proper training loop (verbose removed).
+scripts/train_fast.py
+FAST training using pre-extracted features.
+No GPU needed! Runs in minutes.
 """
 
-import os
-import json
-import torch
-import torch.nn as nn
 import numpy as np
-import random
+import pandas as pd
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.svm import SVC
+from sklearn.linear_model import LogisticRegression
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+import joblib
+import matplotlib.pyplot as plt
+import seaborn as sns
 from pathlib import Path
-from tqdm import tqdm
-from torch.utils.data import DataLoader, random_split
-
-from research.data.dataset import D3Dataset
-from research.models.d3_model import D3Model
 
 
-def seed_everything(seed: int = 42):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-
-
-def collate_fn(batch):
-    """Stack frames and labels."""
-    frames_list = []
-    labels_list = []
+def train_on_features(file_path="full_features_with_gifs.csv", output_dir="trained_models"):
+    """
+    Train classifiers on pre-extracted features.
+    """
+    print("="*60)
+    print("D3+ FAST TRAINING")
+    print("="*60)
     
-    for frames, label in batch:
-        frames_list.append(frames)
-        labels_list.append(label)
+    # Load features
+    print(f"\n📂 Loading features from: {file_path}")
+    data = pd.read_csv(file_path)
     
-    frames_batch = torch.stack(frames_list)
-    return frames_batch, torch.tensor(labels_list, dtype=torch.float32)
-
-
-def train_d3_model(
-    csv_path: Path,
-    model_save_path: Path = Path("trained_models/d3_plus_model.pth"),
-    encoder_type: str = 'XCLIP-16',
-    loss_type: str = 'l2',
-    batch_size: int = 4,
-    learning_rate: float = 1e-4,
-    epochs: int = 50,
-    val_split: float = 0.2,
-    patience: int = 10,
-    max_samples: int = 9999999
-):
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
-    print(f"CSV: {csv_path}")
+    # Check for NaN values
+    nan_count = data.isna().sum().sum()
+    print(f"   Total NaN values in dataset: {nan_count}")
     
-    # Load dataset
-    dataset = D3Dataset(csv_path=csv_path, max_samples=max_samples)
+    if nan_count > 0:
+        print("   ⚠️ NaN values detected! Will impute with median.")
+    
+    X = data.drop('label', axis=1)
+    y = data['label']
+    
+    print(f"   Samples: {X.shape[0]}")
+    print(f"   Features: {X.shape[1]}")
+    print(f"   Classes: {np.unique(y)}")
+    print(f"   Real (0): {np.sum(y == 0)}, Fake (1): {np.sum(y == 1)}")
     
     # Split
-    val_size = int(val_split * len(dataset))
-    train_size = len(dataset) - val_size
-    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
-    
-    train_loader = DataLoader(
-        train_dataset, 
-        batch_size=batch_size, 
-        shuffle=True, 
-        num_workers=0,
-        collate_fn=collate_fn
-    )
-    val_loader = DataLoader(
-        val_dataset, 
-        batch_size=batch_size, 
-        shuffle=False, 
-        num_workers=0,
-        collate_fn=collate_fn
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, stratify=y, random_state=42
     )
     
-    print(f"Train: {len(train_dataset)}, Val: {len(val_dataset)}")
+    print(f"\n📊 Data Split:")
+    print(f"   Train: {len(X_train)} samples")
+    print(f"   Test: {len(X_test)} samples")
     
-    # Model
-    model = D3Model(encoder_type=encoder_type, loss_type=loss_type).to(device)
+    # ============================================================
+    # Impute missing values with MEDIAN (robust to outliers)
+    # ============================================================
+    print("\n🔧 Imputing missing values with median...")
+    imputer = SimpleImputer(strategy='median')
+    X_train_imputed = imputer.fit_transform(X_train)
+    X_test_imputed = imputer.transform(X_test)
     
-    # Optimizer
-    optimizer = torch.optim.AdamW(
-        [p for p in model.parameters() if p.requires_grad], 
-        lr=learning_rate,
-        weight_decay=1e-4
+    # Scale features for SVM and Logistic Regression
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train_imputed)
+    X_test_scaled = scaler.transform(X_test_imputed)
+    
+    print(f"   Features per sample: {X_train_scaled.shape[1]}")
+    print(f"   Imputation complete! ✅")
+    
+    # ============================================================
+    # Random Forest
+    # ============================================================
+    print("\n" + "="*50)
+    print("🌲 Training Random Forest...")
+    print("="*50)
+    
+    rf = RandomForestClassifier(
+        n_estimators=100,
+        max_depth=10,
+        class_weight='balanced',
+        random_state=42,
+        n_jobs=-1
     )
     
-    # FIXED: Removed 'verbose=True'
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', patience=5, factor=0.5
+    cv_scores = cross_val_score(rf, X_train_scaled, y_train, cv=5)
+    print(f"   CV Accuracy: {cv_scores.mean():.4f} ± {cv_scores.std():.4f}")
+    
+    rf.fit(X_train_scaled, y_train)
+    y_pred_rf = rf.predict(X_test_scaled)
+    acc_rf = accuracy_score(y_test, y_pred_rf)
+    print(f"   Test Accuracy: {acc_rf:.4f}")
+    
+    # Feature importance (Random Forest only)
+    importance = rf.feature_importances_
+    top_indices = np.argsort(importance)[-10:][::-1]
+    print(f"   Top 5 features: {top_indices[:5]}")
+    
+    # ============================================================
+    # SVM
+    # ============================================================
+    print("\n" + "="*50)
+    print("⚡ Training SVM...")
+    print("="*50)
+    
+    svm = SVC(
+        kernel='rbf',
+        C=10,
+        gamma='scale',
+        class_weight='balanced',
+        random_state=42,
+        probability=True
     )
     
-    criterion = nn.BCEWithLogitsLoss()
+    cv_scores_svm = cross_val_score(svm, X_train_scaled, y_train, cv=5)
+    print(f"   CV Accuracy: {cv_scores_svm.mean():.4f} ± {cv_scores_svm.std():.4f}")
     
-    # Training
-    best_val_loss = float('inf')
-    patience_counter = 0
-    history = {'train_loss': [], 'val_loss': [], 'train_acc': [], 'val_acc': []}
+    svm.fit(X_train_scaled, y_train)
+    y_pred_svm = svm.predict(X_test_scaled)
+    acc_svm = accuracy_score(y_test, y_pred_svm)
+    print(f"   Test Accuracy: {acc_svm:.4f}")
     
-    for epoch in range(epochs):
-        # Training
-        model.train()
-        train_loss = 0.0
-        train_correct = 0
-        train_total = 0
-        
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs} [Train]")
-        for frames, labels in pbar:
-            frames = frames.to(device)
-            labels = labels.to(device)
-            
-            _, _, score = model(frames)
-            loss = criterion(score, labels)
-            
-            optimizer.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
-            
-            train_loss += loss.item()
-            preds = (torch.sigmoid(score) > 0.5).float()
-            train_correct += (preds == labels).sum().item()
-            train_total += len(labels)
-            pbar.set_postfix({'loss': loss.item()})
-        
-        avg_train_loss = train_loss / len(train_loader)
-        train_acc = train_correct / train_total
-        history['train_loss'].append(avg_train_loss)
-        history['train_acc'].append(train_acc)
-        
-        # Validation
-        model.eval()
-        val_loss = 0.0
-        val_correct = 0
-        val_total = 0
-        
-        with torch.no_grad():
-            for frames, labels in tqdm(val_loader, desc=f"Epoch {epoch+1}/{epochs} [Val]"):
-                frames = frames.to(device)
-                labels = labels.to(device)
-                
-                _, _, score = model(frames)
-                loss = criterion(score, labels)
-                
-                val_loss += loss.item()
-                preds = (torch.sigmoid(score) > 0.5).float()
-                val_correct += (preds == labels).sum().item()
-                val_total += len(labels)
-        
-        avg_val_loss = val_loss / len(val_loader)
-        val_acc = val_correct / val_total
-        history['val_loss'].append(avg_val_loss)
-        history['val_acc'].append(val_acc)
-        
-        print(f"Epoch {epoch+1}: Train Acc: {train_acc:.4f} | Val Acc: {val_acc:.4f}")
-        
-        scheduler.step(avg_val_loss)
-        
-        if avg_val_loss < best_val_loss:
-            best_val_loss = avg_val_loss
-            torch.save(model.state_dict(), model_save_path)
-            patience_counter = 0
-            print(f"  ✅ Saved best model")
-        else:
-            patience_counter += 1
-            if patience_counter >= patience:
-                print(f"  ⏹ Early stopping at epoch {epoch+1}")
-                break
+    # ============================================================
+    # Logistic Regression (Baseline)
+    # ============================================================
+    print("\n" + "="*50)
+    print("📊 Training Logistic Regression...")
+    print("="*50)
     
-    # Save config
-    config_path = model_save_path.parent / "model_config.json"
-    with open(config_path, 'w') as f:
-        json.dump({
-            'encoder_type': encoder_type,
-            'loss_type': loss_type,
-            'best_val_loss': best_val_loss,
-            'best_val_acc': max(history['val_acc']),
-            'epochs_trained': len(history['train_loss'])
-        }, f, indent=2)
+    lr = LogisticRegression(
+        max_iter=1000,
+        class_weight='balanced',
+        random_state=42
+    )
     
-    print(f"✅ Training complete! Best val loss: {best_val_loss:.4f}")
+    cv_scores_lr = cross_val_score(lr, X_train_scaled, y_train, cv=5)
+    print(f"   CV Accuracy: {cv_scores_lr.mean():.4f} ± {cv_scores_lr.std():.4f}")
     
-    return {
-        'history': history,
-        'best_val_loss': best_val_loss,
-        'best_val_acc': max(history['val_acc'])
-    }
+    lr.fit(X_train_scaled, y_train)
+    y_pred_lr = lr.predict(X_test_scaled)
+    acc_lr = accuracy_score(y_test, y_pred_lr)
+    print(f"   Test Accuracy: {acc_lr:.4f}")
+    
+    # ============================================================
+    # Summary
+    # ============================================================
+    print("\n" + "="*50)
+    print("📊 SUMMARY")
+    print("="*50)
+    print(f"   Random Forest Test Accuracy: {acc_rf:.4f}")
+    print(f"   SVM Test Accuracy: {acc_svm:.4f}")
+    print(f"   Logistic Regression Test Accuracy: {acc_lr:.4f}")
+    
+    # Best model
+    best_name = max([('RF', acc_rf), ('SVM', acc_svm), ('LR', acc_lr)], key=lambda x: x[1])
+    print(f"\n🏆 Best Model: {best_name[0]} with {best_name[1]:.4f} accuracy")
+    
+    # ============================================================
+    # Save Models, Imputer, and Scaler
+    # ============================================================
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    joblib.dump(rf, output_dir / "random_forest_model.pkl")
+    joblib.dump(svm, output_dir / "svm_model.pkl")
+    joblib.dump(lr, output_dir / "logistic_regression_model.pkl")
+    joblib.dump(imputer, output_dir / "imputer.pkl")
+    joblib.dump(scaler, output_dir / "scaler.pkl")
+    
+    # Save feature names
+    feature_names = X.columns.tolist()
+    np.save(output_dir / "feature_names.npy", feature_names)
+    
+    print(f"\n✅ Models saved to {output_dir}/")
+    
+    # ============================================================
+    # Save Results
+    # ============================================================
+    with open(output_dir / "fast_training_results.txt", 'w') as f:
+        f.write("D3+ Feature Extraction Results\n")
+        f.write("="*50 + "\n")
+        f.write(f"Total samples: {len(X)}\n")
+        f.write(f"Features per sample: {X.shape[1]}\n")
+        f.write(f"Real: {np.sum(y == 0)}, Fake: {np.sum(y == 1)}\n\n")
+        f.write(f"Random Forest Test Accuracy: {acc_rf:.4f}\n")
+        f.write(f"SVM Test Accuracy: {acc_svm:.4f}\n")
+        f.write(f"Logistic Regression Test Accuracy: {acc_lr:.4f}\n")
+        f.write(f"\nBest Model: {best_name[0]} ({best_name[1]:.4f})\n")
+    
+    # ============================================================
+    # Confusion Matrices
+    # ============================================================
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+    
+    for ax, (name, y_pred, acc) in zip(
+        axes, 
+        [('RF', y_pred_rf, acc_rf), ('SVM', y_pred_svm, acc_svm), ('LR', y_pred_lr, acc_lr)]
+    ):
+        cm = confusion_matrix(y_test, y_pred)
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax,
+                    xticklabels=['Real', 'Fake'],
+                    yticklabels=['Real', 'Fake'])
+        ax.set_title(f'{name}\nAccuracy: {acc:.4f}')
+        ax.set_xlabel('Predicted')
+        ax.set_ylabel('True')
+    
+    plt.tight_layout()
+    plt.savefig(output_dir / "confusion_matrices.png", dpi=150)
+    plt.close()
+    print(f"✅ Confusion matrices saved to {output_dir}/confusion_matrices.png")
+    
+    # ============================================================
+    # Feature Importance Plot (Random Forest)
+    # ============================================================
+    if acc_rf > 0.5:
+        plt.figure(figsize=(10, 8))
+        top_k = min(20, len(importance))
+        top_indices = np.argsort(importance)[-top_k:]
+        top_names = [feature_names[i] for i in top_indices]
+        top_importance = importance[top_indices]
+        
+        plt.barh(range(top_k), top_importance, color='steelblue')
+        plt.yticks(range(top_k), top_names)
+        plt.xlabel('Feature Importance')
+        plt.title('Top 20 Most Important Features (Random Forest)')
+        plt.tight_layout()
+        plt.savefig(output_dir / "feature_importance.png", dpi=150)
+        plt.close()
+        print(f"✅ Feature importance plot saved to {output_dir}/feature_importance.png")
+    
+    print("\n✅ Training complete!")
+    
+    return {'rf': acc_rf, 'svm': acc_svm, 'lr': acc_lr, 'best': best_name[0], 'best_acc': best_name[1]}
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('--csv', type=Path, required=True)
-    parser.add_argument('--output', type=Path, default=Path('trained_models/d3_plus_model.pth'))
-    parser.add_argument('--encoder', type=str, default='XCLIP-16')
-    parser.add_argument('--loss', type=str, default='l2')
-    parser.add_argument('--epochs', type=int, default=50)
-    parser.add_argument('--batch-size', type=int, default=4)
-    parser.add_argument('--patience', type=int, default=10)
-    parser.add_argument('--max-samples', type=int, default=9999999)
+    parser.add_argument('--features', type=str, default='full_features_with_gifs.csv',
+                       help='Path to features file')
+    parser.add_argument('--output', type=str, default='trained_models',
+                       help='Output directory')
     
     args = parser.parse_args()
     
-    train_d3_model(
-        csv_path=args.csv,
-        model_save_path=args.output,
-        encoder_type=args.encoder,
-        loss_type=args.loss,
-        batch_size=args.batch_size,
-        epochs=args.epochs,
-        patience=args.patience,
-        max_samples=args.max_samples
+    train_on_features(
+        file_path=args.features,
+        output_dir=args.output
     )

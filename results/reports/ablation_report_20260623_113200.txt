@@ -1,0 +1,115 @@
+======================================================================
+ABLATION STUDY REPORT
+======================================================================
+
+Total samples: 18574
+Total features: 203
+
+
+Baseline (D3 only):
+----------------------------------------
+
+  Random Forest:
+    accuracy: 0.8336
+    precision: 0.9288
+    recall: 0.6928
+    f1: 0.7936
+    roc_auc: 0.8236
+    ap_score: 0.7852
+
+  SVM (Linear):
+    accuracy: 0.5733
+    precision: 0.5324
+    recall: 0.6199
+    f1: 0.5728
+    roc_auc: 0.6192
+    ap_score: 0.5766
+
+  Logistic Regression:
+    accuracy: 0.5766
+    precision: 0.5364
+    recall: 0.6107
+    f1: 0.5711
+    roc_auc: 0.6217
+    ap_score: 0.5847
+
+D3 + Color:
+----------------------------------------
+
+  Random Forest:
+    accuracy: 0.8302
+    precision: 0.7968
+    recall: 0.8487
+    f1: 0.8219
+    roc_auc: 0.8316
+    ap_score: 0.7461
+
+  SVM (Linear):
+    accuracy: 0.6321
+    precision: 0.5913
+    recall: 0.6577
+    f1: 0.6227
+    roc_auc: 0.6849
+    ap_score: 0.6424
+
+  Logistic Regression:
+    accuracy: 0.6369
+    precision: 0.5973
+    recall: 0.6550
+    f1: 0.6248
+    roc_auc: 0.6922
+    ap_score: 0.6498
+
+D3 + Color + Temporal:
+----------------------------------------
+
+  Random Forest:
+    accuracy: 0.8821
+    precision: 0.8430
+    recall: 0.9152
+    f1: 0.8776
+    roc_auc: 0.8845
+    ap_score: 0.8107
+
+  SVM (Linear):
+    accuracy: 0.9297
+    precision: 0.9181
+    recall: 0.9308
+    f1: 0.9244
+    roc_auc: 0.9738
+    ap_score: 0.9747
+
+  Logistic Regression:
+    accuracy: 0.9347
+    precision: 0.9256
+    recall: 0.9338
+    f1: 0.9296
+    roc_auc: 0.9772
+    ap_score: 0.9797
+
+Full D3+:
+----------------------------------------
+
+  Random Forest:
+    accuracy: 0.9999
+    precision: 1.0000
+    recall: 0.9999
+    f1: 0.9999
+    roc_auc: 0.9999
+    ap_score: 0.9999
+
+  SVM (Linear):
+    accuracy: 0.9995
+    precision: 0.9995
+    recall: 0.9993
+    f1: 0.9994
+    roc_auc: 0.9996
+    ap_score: 0.9998
+
+  Logistic Regression:
+    accuracy: 0.9992
+    precision: 0.9996
+    recall: 0.9987
+    f1: 0.9992
+    roc_auc: 0.9993
+    ap_score: 0.9996
