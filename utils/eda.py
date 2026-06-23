@@ -5,17 +5,17 @@ from typing import Dict, List
 # Load your data
 data = pd.read_csv('full_features_with_gifs.csv')
 
-print("="*60)
-print("📊 DATA OVERVIEW")
-print("="*60)
+print("-----------------------")
+print(" DATA OVERVIEW")
+print("-----------------------")
 print(f"Shape: {data.shape}")
 print(f"Rows: {data.shape[0]}")
 print(f"Columns: {data.shape[1]}")
 print()
 
-print("="*60)
-print("📊 DESCRIPTIVE STATISTICS")
-print("="*60)
+print("-----------------------")
+print(" DESCRIPTIVE STATISTICS")
+print("-----------------------")
 print(data.describe())
 print()
 
@@ -27,8 +27,8 @@ def get_missing_columns(data: pd.DataFrame) -> Dict[str, int]:
 
 missing_dict = get_missing_columns(data)
 
-print("="*60)
-print("📊 COLUMNS WITH MISSING VALUES (DICT)")
-print("="*60)
+print("-----------------------")
+print(" COLUMNS WITH MISSING VALUES (DICT)")
+print("-----------------------")
 print(missing_dict)
 print(list(missing_dict.values()))

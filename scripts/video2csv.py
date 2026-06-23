@@ -97,7 +97,7 @@ def generate_csv_single_file(dataset_path, output_csv=None, max_frames_threshold
     df = pd.DataFrame(data)
     
     if len(df) == 0:
-        print("⚠️ No valid frame directories found!")
+        print(" No valid frame directories found!")
         return None
     
     # Shuffle the data
@@ -106,7 +106,7 @@ def generate_csv_single_file(dataset_path, output_csv=None, max_frames_threshold
     # Save to CSV
     df.to_csv(output_csv, index=False)
     
-    print(f"\n✅ CSV generated!")
+    print(f"\n CSV generated!")
     print(f"   Total samples: {len(df)}")
     print(f"   Real: {len(df[df['label'] == 0])}")
     print(f"   Fake: {len(df[df['label'] == 1])}")

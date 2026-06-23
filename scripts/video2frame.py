@@ -36,8 +36,7 @@ def process_video(video_path, dataset_path):
     video_name = video_path.stem
     
     # Create frame directory path
-    # Example: GenVideo/Real/video1.mp4 → GenVideo/frames/Real/video1/
-    #          GenVideo/Fake/model1/video2.mp4 → GenVideo/frames/Fake/model1/video2/
+    # E.g: GenVideo/Real/video1.mp4 → GenVideo/frames/Real/video1/
     frame_dir = dataset_path / "frames" / rel_path.parent / video_name
     
     # Check if frames already exist
@@ -139,7 +138,7 @@ def main():
     with multiprocessing.Pool(processes=args.workers) as pool:
         pool.starmap(process_video, args_list)
     
-    print("✅ Frame extraction complete!")
+    print(" Frame extraction complete!")
 
 
 if __name__ == '__main__':

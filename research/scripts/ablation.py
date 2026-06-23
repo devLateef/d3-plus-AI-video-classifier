@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.svm import LinearSVC  # Faster than SVC
+from sklearn.svm import LinearSVC  
 from sklearn.linear_model import LogisticRegression
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
@@ -51,7 +51,7 @@ class AblationStudy:
             'Full D3+': self.X.columns.tolist()
         }
         
-        # Classifiers - FIXED: Use LinearSVC instead of SVC
+        # Classifiers
         self.classifiers = {
             'Random Forest': RandomForestClassifier(
                 n_estimators=100,
@@ -218,28 +218,25 @@ class AblationStudy:
         
         report_path = self.output_dir / f"ablation_report_{timestamp}.txt"
         with open(report_path, 'w') as f:
-            f.write("="*70 + "\n")
             f.write("ABLATION STUDY REPORT\n")
-            f.write("="*70 + "\n\n")
             f.write(f"Total samples: {len(self.X)}\n")
             f.write(f"Total features: {len(self.X.columns)}\n\n")
             
             for config_name, config_results in results.items():
                 f.write(f"\n{config_name}:\n")
-                f.write("-"*40 + "\n")
                 for clf_name, metrics in config_results.items():
                     f.write(f"\n  {clf_name}:\n")
                     for metric, value in metrics.items():
                         f.write(f"    {metric}: {value:.4f}\n")
         
-        print(f"\n✅ Results saved to:\n   {json_path}\n   {report_path}")
+        print(f"\n Results saved to:\n   {json_path}\n   {report_path}")
     
     def _generate_figures(self, results):
         """Generate ablation figures."""
         self._plot_performance_comparison(results, "ablation_comparison")
         self._plot_feature_contribution(results, "feature_contribution")
         self._plot_confusion_matrices(results, "ablation_confusion")
-        print(f"\n✅ Figures saved to {self.output_dir}")
+        print(f"\n Figures saved to {self.output_dir}")
     
     def _plot_performance_comparison(self, results, filename):
         """Plot performance comparison across configurations."""

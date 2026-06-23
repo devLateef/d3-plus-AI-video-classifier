@@ -38,7 +38,7 @@ df['label'] = y
 # Save as CSV
 df.to_csv('full_features_with_gifs.csv', index=False)
 
-print(f"✅ CSV saved with {len(df)} rows and {len(df.columns)} columns")
+print(f" CSV saved with {len(df)} rows and {len(df.columns)} columns")
 print(f"   Features: {len(df.columns) - 1}")  # -1 for label column
 
 # Show first few rows

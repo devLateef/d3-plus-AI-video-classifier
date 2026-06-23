@@ -59,18 +59,16 @@ class D3Model(nn.Module):
         for param in self.encoder.parameters():
             param.requires_grad = False
         
-        # ============================================================
-        # FIXED: Classifier for combined features (batch, 2)
-        # ============================================================
+    
         # combined = [dis_2nd_avg, dis_2nd_std] -> shape (batch, 2)
         self.classifier = nn.Sequential(
-            nn.Linear(2, 32),      # Input: 2 features from D3
+            nn.Linear(2, 32),      # 2 features from D3
             nn.ReLU(),
             nn.Dropout(0.3),
             nn.Linear(32, 16),
             nn.ReLU(),
             nn.Dropout(0.3),
-            nn.Linear(16, 1)       # Output: single score
+            nn.Linear(16, 1)      
         )
         
         total_params = sum(p.numel() for p in self.parameters())

@@ -45,7 +45,7 @@ class D3Predictor:
         self.video_processor = VideoProcessor()
         self.feature_extractor = FeatureExtractor()
         
-        print(f"✅ D3Predictor initialized on {self.device}")
+        print(f" D3Predictor initialized on {self.device}")
     
     def predict(self, video_path: Path) -> Dict[str, float]:
         """

@@ -1,9 +1,3 @@
-"""
-scripts/extract_gif_features.py
-Extract ALL features from GIF files (D3, Color, Temporal, Bitrate).
-FIXED: Robust frame loading with error handling.
-"""
-
 import os
 import sys
 import numpy as np
@@ -325,7 +319,7 @@ def extract_all_gif_features(
                         labels=labels_arr,
                         paths=np.array(all_paths))
     
-    print(f"\n✅ GIF features saved to: {output_path}")
+    print(f"\n GIF features saved to: {output_path}")
     print(f"   Feature shape: {features_arr.shape}")
     print(f"   Labels shape: {labels_arr.shape}")
     print(f"   Feature vector length: {features_arr.shape[1]}")

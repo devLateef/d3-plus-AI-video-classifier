@@ -146,10 +146,6 @@ def find_original_file_path(frame_dir_path, dataset_root):
     # Try to find the video file by searching
     extensions = ['.mp4', '.avi', '.mov', '.mkv', '.gif']
     
-    # Strategy 1: Try to match the path structure
-    # frame_dir: .../frames/Fake/Show_1/show1_664
-    # video:     .../Fake/Show_1/show1_664.mp4
-    
     # Get the relative path from dataset root
     try:
         rel_path = frame_dir.relative_to(dataset_root)
@@ -240,7 +236,7 @@ def extract_all_features_fast(csv_path, dataset_root, output_path="full_features
     fake_path = dataset_root / 'Fake'
     
     if not real_path.exists() and not fake_path.exists():
-        print(f"❌ ERROR: No 'Real' or 'Fake' folders found in {dataset_root}")
+        print(f" ERROR: No 'Real' or 'Fake' folders found in {dataset_root}")
         print(f"   Real path: {real_path}")
         print(f"   Fake path: {fake_path}")
         print("\nPlease check your dataset path.")
@@ -249,7 +245,7 @@ def extract_all_features_fast(csv_path, dataset_root, output_path="full_features
         parent = dataset_root.parent
         for _ in range(3):  # Search up to 3 levels up
             if (parent / 'Real').exists() and (parent / 'Fake').exists():
-                print(f"✅ Found dataset in: {parent}")
+                print(f" Found dataset in: {parent}")
                 dataset_root = parent
                 real_path = dataset_root / 'Real'
                 fake_path = dataset_root / 'Fake'
@@ -334,7 +330,7 @@ def extract_all_features_fast(csv_path, dataset_root, output_path="full_features
                         features=features_arr, 
                         labels=labels_arr)
     
-    print(f"\n✅ Features saved to: {output_path}")
+    print(f"\n Features saved to: {output_path}")
     print(f"   Feature shape: {features_arr.shape}")
     print(f"   Labels shape: {labels_arr.shape}")
     print(f"   Feature vector length: {features_arr.shape[1]}")

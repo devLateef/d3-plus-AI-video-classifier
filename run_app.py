@@ -22,9 +22,9 @@ def run_streamlit():
     os.system("streamlit run ui/streamlit_app.py --server.port 8501")
 
 def main():
-    print("="*60)
-    print("🚀 Starting D3+ AI Video Detector")
-    print("="*60)
+    print("-----------------------")
+    print(" Starting D3+ AI Video Detector")
+    print("-----------------------")
     print("\nStarting FastAPI server on http://localhost:8000")
     print("Starting Streamlit UI on http://localhost:8501")
     print("\nPress Ctrl+C to stop both services\n")
@@ -45,7 +45,7 @@ def main():
         api_thread.join()
         streamlit_thread.join()
     except KeyboardInterrupt:
-        print("\n\n🛑 Shutting down services...")
+        print("\n\n Shutting down services...")
         os.kill(os.getpid(), signal.SIGTERM)
 
 if __name__ == "__main__":

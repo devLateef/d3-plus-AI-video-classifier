@@ -23,9 +23,9 @@ def check_outliers(data: pd.DataFrame, columns: list = None):
     if columns is None:
         columns = [col for col in data.columns if '_skew' in col or '_kurt' in col]
     
-    print("="*60)
-    print("📊 OUTLIER ANALYSIS FOR COLUMNS WITH MISSING VALUES")
-    print("="*60)
+    print("-----------------------")
+    print(" OUTLIER ANALYSIS FOR COLUMNS WITH MISSING VALUES")
+    print("-----------------------")
     print(f"Checking {len(columns)} columns...")
     print()
     
@@ -36,7 +36,7 @@ def check_outliers(data: pd.DataFrame, columns: list = None):
         values = data[col].dropna().values
         
         if len(values) == 0:
-            print(f"⚠️ {col}: All values are missing!")
+            print(f" {col}: All values are missing!")
             continue
         
         # Calculate statistics
@@ -78,20 +78,20 @@ def check_outliers(data: pd.DataFrame, columns: list = None):
         }
     
     # Display results
-    print("="*60)
-    print("📊 SUMMARY STATISTICS")
-    print("="*60)
+    print("-----------------------")
+    print(" SUMMARY STATISTICS")
+    print("-----------------------")
     print(f"{'Column':<25} {'Missing':<10} {'Outliers':<10} {'Outlier%':<10} {'Range'}")
-    print("-"*80)
+    print("-----------------------")
     
     for col, stats_dict in results.items():
         if stats_dict:
             print(f"{col:<25} {stats_dict['missing_count']:<10} {stats_dict['outlier_count']:<10} {stats_dict['outlier_percentage']:<10.2f} [{stats_dict['min']:.4f}, {stats_dict['max']:.4f}]")
     
     print()
-    print("="*60)
-    print("📊 DETAILED STATISTICS FOR EACH COLUMN")
-    print("="*60)
+    print("-----------------------")
+    print(" DETAILED STATISTICS FOR EACH COLUMN")
+    print("-----------------------")
     
     for col, stats_dict in results.items():
         if stats_dict:
@@ -151,7 +151,7 @@ def plot_outliers(data: pd.DataFrame, columns: list = None, n_cols: int = 4):
     plt.tight_layout()
     plt.savefig('outlier_plots.png', dpi=150)
     plt.show()
-    print("✅ Plots saved to 'outlier_plots.png'")
+    print(" Plots saved to 'outlier_plots.png'")
 
 
 def analyze_missing_patterns(data: pd.DataFrame):
@@ -163,7 +163,7 @@ def analyze_missing_patterns(data: pd.DataFrame):
     kurt_cols = [col for col in data.columns if '_kurt' in col]
     
     print("="*60)
-    print("📊 MISSING VALUE PATTERN ANALYSIS")
+    print(" MISSING VALUE PATTERN ANALYSIS")
     print("="*60)
     
     # Check if missing values occur in the same rows
