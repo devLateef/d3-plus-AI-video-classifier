@@ -8,12 +8,11 @@ import requests
 import json
 import time
 import os
+import sys
 from pathlib import Path
 from datetime import datetime
-import plotly.graph_objects as go
-import pandas as pd
 
-# Page config
+# Set Streamlit config options (also set via environment)
 st.set_page_config(
     page_title="D3+ AI Video Detector",
     page_icon="🎬",
@@ -87,6 +86,104 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =============================================================================
+# Helper Functions
+# =============================================================================
+
+def check_api_health(api_url: str) -> tuple:
+    """Check if API is healthy."""
+    try:
+        response = requests.get(f"{api_url}/health", timeout=5)
+        if response.status_code == 200:
+            return True, response.json()
+        return False, {"error": f"API returned {response.status_code}"}
+    except requests.exceptions.ConnectionError:
+        return False, {"error": f"Cannot connect to API at {api_url}"}
+    except Exception as e:
+        return False, {"error": str(e)}
+
+
+def display_verdict(is_ai: bool):
+    """Display verdict badge."""
+    if is_ai:
+        st.markdown('<span class="verdict-badge verdict-ai">🚨 AI-GENERATED</span>', unsafe_allow_html=True)
+    else:
+        st.markdown('<span class="verdict-badge verdict-real">✅ AUTHENTIC</span>', unsafe_allow_html=True)
+
+
+def display_confidence_bar(confidence: float):
+    """Display confidence bar."""
+    color = "#28a745" if confidence > 0.8 else "#ffa500" if confidence > 0.5 else "#dc3545"
+    st.markdown(f"""
+        <div class="confidence-bar">
+            <div class="confidence-fill" style="width:{confidence*100:.1f}%; background:{color};">
+                {confidence:.1%}
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+
+
+def display_full_report(report: dict):
+    """Display full report."""
+    if not report:
+        return
+    
+    prediction = report.get('prediction', {})
+    is_ai = prediction.get('is_ai_generated', False)
+    confidence = prediction.get('confidence_score', 0)
+    
+    # Verdict
+    card_class = "danger" if is_ai else "success"
+    st.markdown(f"""
+        <div class="report-card {card_class}">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <h3 style="margin:0;">{'🚨 AI-GENERATED' if is_ai else '✅ AUTHENTIC'}</h3>
+                    <p style="margin:0; color:#666;">Verdict based on multi-dimensional analysis</p>
+                </div>
+                <div style="text-align: right;">
+                    <div style="font-size: 2rem; font-weight: 700;">{confidence:.1%}</div>
+                    <div style="color:#666; font-size: 0.8rem;">Confidence Score</div>
+                </div>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    # Feature breakdown
+    if 'feature_breakdown' in report:
+        st.markdown("#### 🔬 Feature Breakdown")
+        fb = report['feature_breakdown']
+        cols = st.columns(3)
+        features = [
+            ("D3 Score", fb.get('d3_score', 0)),
+            ("Color Features", fb.get('color_features', 0)),
+            ("Temporal Features", fb.get('temporal_features', 0))
+        ]
+        for col, (name, value) in zip(cols, features):
+            with col:
+                st.metric(name, f"{value:.1%}")
+                st.progress(value)
+    
+    # Interpretation
+    if 'interpretation' in report:
+        st.markdown("#### 📝 Interpretation")
+        st.info(report['interpretation'].get('summary', 'No interpretation available.'))
+        st.caption(f"Confidence Level: {report['interpretation'].get('confidence_level', 'N/A')}")
+    
+    # Metadata
+    if 'metadata' in report:
+        st.markdown("#### 📋 Video Metadata")
+        md = report['metadata']
+        cols = st.columns(4)
+        with cols[0]:
+            st.metric("Duration", f"{md.get('duration', 0):.1f}s")
+        with cols[1]:
+            st.metric("Resolution", f"{md.get('width', 0)}x{md.get('height', 0)}")
+        with cols[2]:
+            st.metric("Codec", md.get('codec', 'N/A'))
+        with cols[3]:
+            st.metric("Frame Rate", f"{md.get('frame_rate', 0):.1f} fps")
+
+# =============================================================================
 # Sidebar
 # =============================================================================
 
@@ -96,24 +193,18 @@ with st.sidebar:
     st.markdown("---")
     
     # API configuration
-    api_url = st.text_input("API URL", value="http://127.0.0.1:8000")
+    api_url = st.text_input("API URL", value="http://localhost:8000")
     
     col1, col2 = st.columns(2)
     with col1:
         if st.button("🔄 Check Health", use_container_width=True):
-            try:
-                response = requests.get(f"{api_url}/health", timeout=5)
-                if response.status_code == 200:
-                    data = response.json()
+            with st.spinner("Checking API health..."):
+                is_healthy, data = check_api_health(api_url)
+                if is_healthy:
                     st.success(f"✅ API is healthy")
                     st.caption(f"Version: {data.get('version', 'N/A')}")
                 else:
-                    st.error(f"❌ API error: {response.status_code}")
-            except requests.exceptions.ConnectionError:
-                st.error(f"❌ Cannot connect to API at {api_url}")
-                st.info("Make sure the FastAPI server is running with: python run_app.py")
-            except Exception as e:
-                st.error(f"❌ Error: {str(e)}")
+                    st.error(f"❌ {data.get('error', 'API not reachable')}")
     
     with col2:
         if st.button("🧹 Clear Cache", use_container_width=True):
@@ -138,7 +229,7 @@ st.markdown("Upload a video to receive a detailed, explainable report on whether
 tab1, tab2 = st.tabs(["📤 Upload & Analyze", "📊 Report"])
 
 # =============================================================================
-# Tab 1: Upload & Analyze
+# Tab 1: Upload
 # =============================================================================
 
 with tab1:
@@ -152,42 +243,32 @@ with tab1:
         # Display video preview
         video_bytes = uploaded_file.read()
         st.video(video_bytes)
-        
-        # Reset file pointer
         uploaded_file.seek(0)
         
-        # Analyze button with full error handling
         if st.button("🔍 Analyze Video", type="primary", use_container_width=True):
-            # Show progress
             progress_bar = st.progress(0)
             status_text = st.empty()
             
             try:
-                # Step 1: Check API health
+                # Check API health
                 status_text.text("🔄 Checking API health...")
                 progress_bar.progress(10)
                 
-                try:
-                    health_response = requests.get(f"{api_url}/health", timeout=3)
-                    if health_response.status_code != 200:
-                        st.error("❌ API is not healthy. Please check the server.")
-                        st.stop()
-                except requests.exceptions.ConnectionError:
-                    st.error(f"❌ Cannot connect to API at {api_url}")
+                is_healthy, health_data = check_api_health(api_url)
+                if not is_healthy:
+                    st.error(f"❌ {health_data.get('error', 'API not reachable')}")
                     st.info("Make sure the FastAPI server is running with: python run_app.py")
-                    st.stop()
-                except Exception as e:
-                    st.error(f"❌ API health check failed: {str(e)}")
+                    progress_bar.progress(0)
                     st.stop()
                 
-                # Step 2: Upload video
+                # Upload video
                 status_text.text("📤 Uploading video...")
                 progress_bar.progress(20)
                 
                 files = {"file": (uploaded_file.name, uploaded_file, uploaded_file.type)}
                 start_time = time.time()
                 
-                # Step 3: Process video
+                # Process
                 status_text.text("🧠 Analyzing video... (this may take 10-30 seconds)")
                 progress_bar.progress(40)
                 
@@ -198,13 +279,10 @@ with tab1:
                     progress_bar.progress(100)
                     status_text.text("✅ Analysis complete!")
                     
-                    # Add video name to result
                     result['video_name'] = uploaded_file.name
                     result['analysis_time'] = time.time() - start_time
                     
-                    # Store result in session state
                     st.session_state.result = result
-                    
                     st.success("✅ Analysis complete! View the report in the 'Report' tab.")
                     st.rerun()
                 else:
@@ -233,89 +311,17 @@ with tab2:
         result = st.session_state.result
         report = result.get('report', {})
         
-        # Video info header
+        # Video info
         st.markdown(f"### 📹 {result.get('video_name', 'Uploaded Video')}")
         st.caption(f"Video ID: `{result.get('video_id', 'N/A')}`")
         if "analysis_time" in result:
             st.caption(f"Analysis time: {result['analysis_time']:.2f} seconds")
         
-        # Verdict
-        is_ai = result.get('is_ai_generated', False)
-        confidence = result.get('confidence_score', 0)
-        
-        card_class = "danger" if is_ai else "success"
-        st.markdown(f"""
-            <div class="report-card {card_class}">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <div>
-                        <h3 style="margin:0;">{'🚨 AI-GENERATED' if is_ai else '✅ AUTHENTIC'}</h3>
-                        <p style="margin:0; color:#666;">Verdict based on multi-dimensional analysis</p>
-                    </div>
-                    <div style="text-align: right;">
-                        <div style="font-size: 2rem; font-weight: 700;">{confidence:.1%}</div>
-                        <div style="color:#666; font-size: 0.8rem;">Confidence Score</div>
-                    </div>
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
-        
-        # Confidence bar
-        st.markdown("#### 📊 Confidence Breakdown")
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            st.markdown("**Prediction Probability**")
-            color = "#28a745" if confidence > 0.8 else "#ffa500" if confidence > 0.5 else "#dc3545"
-            st.markdown(f"""
-                <div class="confidence-bar">
-                    <div class="confidence-fill" style="width:{confidence*100:.1f}%; background:{color};">
-                        {confidence:.1%}
-                    </div>
-                </div>
-            """, unsafe_allow_html=True)
-        with col2:
-            st.metric("Processing Time", f"{result.get('prediction_time_ms', 0):.0f}ms")
-        
-        # Feature breakdown
-        if report and 'feature_breakdown' in report:
-            st.markdown("#### 🔬 Feature Breakdown")
-            fb = report['feature_breakdown']
-            cols = st.columns(3)
-            features = [
-                ("D3 Score", fb.get('d3_score', 0)),
-                ("Color Features", fb.get('color_features', 0)),
-                ("Temporal Features", fb.get('temporal_features', 0))
-            ]
-            for col, (name, value) in zip(cols, features):
-                with col:
-                    st.metric(name, f"{value:.1%}")
-                    st.progress(value)
-        
-        # Interpretation
-        if report and 'interpretation' in report:
-            st.markdown("#### 📝 Interpretation")
-            st.info(report['interpretation'].get('summary', 'No interpretation available.'))
-            st.caption(f"Confidence Level: {report['interpretation'].get('confidence_level', 'N/A')}")
-        
-        # Video metadata
-        if report and 'metadata' in report:
-            st.markdown("#### 📋 Video Metadata")
-            md = report['metadata']
-            cols = st.columns(4)
-            with cols[0]:
-                st.metric("Duration", f"{md.get('duration', 0):.1f}s")
-            with cols[1]:
-                st.metric("Resolution", f"{md.get('width', 0)}x{md.get('height', 0)}")
-            with cols[2]:
-                st.metric("Codec", md.get('codec', 'N/A'))
-            with cols[3]:
-                st.metric("Frame Rate", f"{md.get('frame_rate', 0):.1f} fps")
-        
-        # Full report JSON
-        with st.expander("📄 View Full Report Data (JSON)"):
-            st.json(report)
-        
-        # Download report button
+        # Display report
         if report:
+            display_full_report(report)
+            
+            # JSON download
             report_json = json.dumps(report, indent=2)
             st.download_button(
                 label="📥 Download Report (JSON)",
@@ -325,7 +331,6 @@ with tab2:
                 use_container_width=True
             )
         
-        # Reset button
         if st.button("🔄 New Analysis", use_container_width=True):
             del st.session_state.result
             st.rerun()
