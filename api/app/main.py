@@ -109,7 +109,7 @@ async def predict_video(
         frames = video_processor.process_video(video_path)
         
         # Run prediction
-        result = predictor.predict(frames, video_path)
+        result = predictor.predict_from_frames(frames, video_path)
         
         # Generate report
         report = generate_detailed_report(video_path, result, video_id)
