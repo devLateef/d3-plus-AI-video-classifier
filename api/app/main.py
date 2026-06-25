@@ -11,6 +11,7 @@ from pathlib import Path
 from datetime import datetime
 
 import torch
+import numpy as np
 from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
@@ -19,7 +20,7 @@ import uvicorn
 from api.app.config import settings
 from api.app.schemas import (
     PredictionResponse, HealthResponse, ErrorResponse,
-    BatchPredictionResponse, DetailedReportResponse
+    BatchPredictionResponse
 )
 from api.app.dependencies import get_predictor_singleton, get_video_processor_singleton
 
@@ -46,6 +47,24 @@ app.add_middleware(
 # Get singletons
 predictor = get_predictor_singleton()
 video_processor = get_video_processor_singleton()
+
+
+def convert_numpy_types(obj):
+    """Recursively convert numpy types to Python native types."""
+    if isinstance(obj, dict):
+        return {key: convert_numpy_types(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_types(item) for item in obj]
+    elif isinstance(obj, np.bool_):
+        return bool(obj)
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    else:
+        return obj
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -85,7 +104,7 @@ async def predict_video(
             detail=f"File type not supported. Allowed: {', '.join(settings.allowed_extensions)}"
         )
     
-    # Validate file size - FIXED: file.size is an attribute, not a method
+    # Validate file size
     file_size = file.size
     if file_size > settings.max_file_size_mb * 1024 * 1024:
         raise HTTPException(
@@ -111,6 +130,9 @@ async def predict_video(
         # Run prediction
         result = predictor.predict_from_frames(frames, video_path)
         
+        # Convert numpy types to Python types for JSON serialization
+        result = convert_numpy_types(result)
+        
         # Generate report
         report = generate_detailed_report(video_path, result, video_id)
         
@@ -124,16 +146,18 @@ async def predict_video(
         
         total_time = (time.time() - start_time) * 1000
         
-        return PredictionResponse(
+        response = PredictionResponse(
             video_id=video_id,
-            is_ai_generated=result['is_ai_generated'],
-            confidence_score=result['confidence'],
-            probability=result['probability'],
-            prediction_time_ms=result.get('prediction_time_ms', 0),
-            total_time_ms=total_time,
+            is_ai_generated=bool(result['is_ai_generated']),
+            confidence_score=float(result['confidence']),
+            probability=float(result['probability']),
+            prediction_time_ms=float(result.get('prediction_time_ms', 0)),
+            total_time_ms=float(total_time),
             report=report,
             status="success"
         )
+        
+        return response
         
     except Exception as e:
         background_tasks.add_task(lambda: os.remove(video_path))
@@ -231,27 +255,27 @@ def generate_detailed_report(video_path: Path, result: dict, video_id: str) -> d
             'frame_rate': 0
         }
     
-    # Build report
+    # Build report with converted types
     report = {
         'video_id': video_id,
         'timestamp': datetime.now().isoformat(),
         'prediction': {
-            'is_ai_generated': result['is_ai_generated'],
-            'probability': result['probability'],
-            'confidence_score': result['confidence'],
-            'raw_d3_score': result.get('raw_score', 0.5)
+            'is_ai_generated': bool(result.get('is_ai_generated', False)),
+            'probability': float(result.get('probability', 0.5)),
+            'confidence_score': float(result.get('confidence', 0.5)),
+            'raw_d3_score': float(result.get('raw_score', 0.5))
         },
         'metadata': metadata,
         'feature_breakdown': {
-            'd3_score': result.get('raw_score', 0.5),
-            'color_features': result.get('color_score', 0.5),
-            'temporal_features': result.get('temporal_score', 0.5)
+            'd3_score': float(result.get('raw_score', 0.5)),
+            'color_features': float(result.get('color_score', 0.5)),
+            'temporal_features': float(result.get('temporal_score', 0.5))
         },
         'interpretation': {
-            'confidence_level': 'High' if result['confidence'] > 0.8 else 'Medium' if result['confidence'] > 0.6 else 'Low',
+            'confidence_level': 'High' if float(result.get('confidence', 0)) > 0.8 else 'Medium' if float(result.get('confidence', 0)) > 0.6 else 'Low',
             'summary': _generate_summary(result)
         },
-        'processing_time_ms': result.get('prediction_time_ms', 0)
+        'processing_time_ms': float(result.get('prediction_time_ms', 0))
     }
     
     return report
@@ -259,15 +283,18 @@ def generate_detailed_report(video_path: Path, result: dict, video_id: str) -> d
 
 def _generate_summary(result: dict) -> str:
     """Generate human-readable summary."""
-    if result['is_ai_generated']:
-        if result['confidence'] > 0.8:
+    is_ai = result.get('is_ai_generated', False)
+    confidence = result.get('confidence', 0)
+    
+    if is_ai:
+        if confidence > 0.8:
             return "With high confidence, this video appears to be AI-generated. The model detected strong artifacts consistent with synthetic generation."
-        elif result['confidence'] > 0.6:
+        elif confidence > 0.6:
             return "This video shows signs of AI generation, but with moderate confidence. Additional analysis recommended."
         else:
             return "This video may be AI-generated, but confidence is low. Consider manual review."
     else:
-        if result['confidence'] > 0.8:
+        if confidence > 0.8:
             return "With high confidence, this video appears to be authentic. No significant AI generation artifacts detected."
         else:
             return "This video appears to be authentic, but with moderate confidence. Consider additional verification."
