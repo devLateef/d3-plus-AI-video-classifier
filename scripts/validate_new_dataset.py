@@ -217,7 +217,7 @@ def validate_model_on_new_dataset(
     
     # Show sample predictions
     print("\nSample predictions:")
-    print(results.head(10).to_string(index=False))
+    print(results.head(5).to_string(index=False))
     
     return results
 
