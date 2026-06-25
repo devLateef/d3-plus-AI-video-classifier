@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from research.models.d3_model import D3Model
 from research.data.dataset import crop_center_by_percentage, get_preprocessing_pipeline
-from scripts.extract_all_features_fast import (
+from scripts.extract_all_features import (
     extract_color_features, 
     extract_temporal_features,
     extract_bitrate_features_video
