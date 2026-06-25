@@ -9,6 +9,7 @@ import joblib
 from pathlib import Path
 from typing import Dict, Tuple, Optional, List
 import time
+import pandas as pd
 import cv2
 import tempfile
 import subprocess
@@ -23,7 +24,6 @@ class D3PlusPredictor:
     D3+ video predictor with confidence scoring.
     Uses scikit-learn models (Random Forest, SVM, etc.)
     """
-    
     def __init__(
         self,
         rf_model_path: Path,
@@ -168,7 +168,6 @@ class D3PlusPredictor:
         This should match your existing feature extraction pipeline.
         """
         # This is a simplified version - you should use your existing feature extraction
-        import pandas as pd
         from scripts.extract_all_features import extract_all_features_from_video
         
         # Extract features

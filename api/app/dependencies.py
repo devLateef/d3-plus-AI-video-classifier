@@ -12,6 +12,7 @@ import torch
 from api.app.config import settings
 from shared.d3_predictor import get_predictor
 from shared.video_processor import VideoProcessor
+from shared.d3_predictor import D3PlusPredictor
 
 
 def get_video_processor() -> VideoProcessor:
