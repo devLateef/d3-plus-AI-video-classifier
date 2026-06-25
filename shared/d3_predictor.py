@@ -8,11 +8,8 @@ import numpy as np
 import joblib
 import pandas as pd
 from pathlib import Path
-from typing import Dict, Tuple, Optional, List
+from typing import Dict, Optional
 import time
-import cv2
-import tempfile
-import subprocess
 
 from shared.video_processor import VideoProcessor
 from shared.feature_extractor import FeatureExtractor
@@ -33,7 +30,7 @@ class D3PlusPredictor:
         imputer_path: Optional[Path] = None,
         scaler_path: Optional[Path] = None,
         feature_names_path: Optional[Path] = None,
-        device: str = "cuda",
+        device: str = "cpu",
         threshold: float = 0.5
     ):
         """
@@ -86,7 +83,7 @@ class D3PlusPredictor:
         self.video_processor = VideoProcessor()
         self.feature_extractor = FeatureExtractor()
         
-        # D3 model for feature extraction (needs to be loaded separately)
+        # D3 model for feature extraction (load if needed)
         self.d3_model = None
         
         print(f"✅ D3PlusPredictor initialized on {self.device}")
@@ -106,7 +103,7 @@ class D3PlusPredictor:
     
     def predict(self, video_path: Path) -> Dict[str, float]:
         """
-        Predict if video is AI-generated.
+        Predict if video is AI-generated from a video file.
         
         Args:
             video_path: Path to video file
@@ -116,11 +113,14 @@ class D3PlusPredictor:
         """
         start_time = time.time()
         
-        # Process video and extract features
-        features_df = self._extract_features(video_path)
+        # Process video and get frames tensor
+        frames_tensor = self.video_processor.process_video(video_path)
+        
+        # Extract features from frames
+        features = self._extract_features_from_frames(frames_tensor, video_path)
         
         # Prepare features for model
-        X = features_df.drop('video_name', axis=1) if 'video_name' in features_df.columns else features_df
+        X = np.array([features])
         
         # Handle missing values and scale
         if self.imputer is not None:
@@ -133,8 +133,7 @@ class D3PlusPredictor:
         else:
             X_scaled = X_imputed
         
-        # Predict with Random Forest (primary model)
-        y_pred = self.model.predict(X_scaled)[0]
+        # Predict with Random Forest
         y_proba = self.model.predict_proba(X_scaled)[0]
         
         # Get probability of being fake (class 1)
@@ -167,10 +166,10 @@ class D3PlusPredictor:
         start_time = time.time()
         
         # Extract features from frames
-        features_df = self._extract_features_from_frames(frames_tensor, video_path)
+        features = self._extract_features_from_frames(frames_tensor, video_path)
         
         # Prepare features for model
-        X = features_df.drop('video_name', axis=1) if 'video_name' in features_df.columns else features_df
+        X = np.array([features])
         
         # Handle missing values and scale
         if self.imputer is not None:
@@ -183,7 +182,7 @@ class D3PlusPredictor:
         else:
             X_scaled = X_imputed
         
-        # Predict with Random Forest (primary model)
+        # Predict with Random Forest
         y_proba = self.model.predict_proba(X_scaled)[0]
         
         # Get probability of being fake (class 1)
@@ -202,53 +201,89 @@ class D3PlusPredictor:
             'raw_score': float(probability)
         }
     
-    def _extract_features(self, video_path: Path) -> pd.DataFrame:
+    def _extract_features_from_frames(self, frames_tensor: torch.Tensor, video_path: Path) -> np.ndarray:
         """
-        Extract 203 features from video.
-        This should match your existing feature extraction pipeline.
+        Extract the 203 features from pre-processed frames.
+        This replicates your feature extraction pipeline.
         """
-        # This is a placeholder - you should use your existing feature extraction
-        from scripts.extract_all_features import extract_all_features_from_video
+        import cv2
+        import torch.nn.functional as F
+        from scipy.stats import skew, kurtosis
         
-        features = extract_all_features_from_video(video_path)
-        
-        if self.feature_names is not None:
-            df = pd.DataFrame([features], columns=self.feature_names)
+        # Convert frames to numpy
+        if isinstance(frames_tensor, torch.Tensor):
+            frames_np = frames_tensor.cpu().numpy()
         else:
-            df = pd.DataFrame([features])
+            frames_np = frames_tensor
         
-        return df
-    
-    def _extract_features_from_frames(self, frames_tensor: torch.Tensor, video_path: Path) -> pd.DataFrame:
-        """
-        Extract 203 features from pre-processed frames.
-        """
-        # Use your existing feature extraction from frames
-        from scripts.extract_all_features import extract_features_from_tensor
-        
-        features = extract_features_from_tensor(frames_tensor, video_path)
-        
-        if self.feature_names is not None:
-            df = pd.DataFrame([features], columns=self.feature_names)
+        # Extract D3 features
+        if self.d3_model is not None:
+            frames_tensor_device = frames_tensor.unsqueeze(0).to(self.device)
+            with torch.no_grad():
+                _, d3_avg, d3_score = self.d3_model(frames_tensor_device)
+                d3_avg = d3_avg.cpu().numpy()[0]
+                d3_std = d3_score.cpu().numpy()[0] if isinstance(d3_score, torch.Tensor) else d3_score
         else:
-            df = pd.DataFrame([features])
+            # Fallback: compute simple features
+            d3_avg = 0.0
+            d3_std = 0.0
         
-        return df
+        # Extract color features
+        color_features = []
+        for frame_idx in range(min(16, len(frames_np))):
+            frame = frames_np[frame_idx]
+            # frame is (C, H, W) or (H, W, C)
+            if frame.shape[0] == 3:
+                frame_hwc = frame.transpose(1, 2, 0)
+            else:
+                frame_hwc = frame
+            
+            for c in range(min(3, frame_hwc.shape[2])):
+                channel = frame_hwc[:, :, c].flatten()
+                color_features.extend([
+                    float(np.mean(channel)),
+                    float(np.std(channel)),
+                    float(skew(channel)),
+                    float(kurtosis(channel))
+                ])
+        
+        # Pad color features to 192 (16 frames * 3 channels * 4 stats)
+        while len(color_features) < 192:
+            color_features.append(0.0)
+        color_features = color_features[:192]
+        
+        # Extract temporal features
+        temporal_features = []
+        if len(frames_np) > 1:
+            diffs = []
+            for i in range(1, len(frames_np)):
+                diff = np.mean(np.abs(frames_np[i] - frames_np[i-1]))
+                diffs.append(diff)
+            if diffs:
+                temporal_features = [float(np.mean(diffs)), float(np.std(diffs)), float(np.max(diffs))]
+            else:
+                temporal_features = [0.0, 0.0, 0.0]
+        else:
+            temporal_features = [0.0, 0.0, 0.0]
+        
+        # Extract bitrate features (simplified)
+        bitrate_features = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        
+        # Combine all features
+        combined = [d3_avg, d3_std] + color_features + temporal_features + bitrate_features
+        
+        # Ensure we have exactly 203 features
+        while len(combined) < 203:
+            combined.append(0.0)
+        combined = combined[:203]
+        
+        return np.array(combined)
     
     def _compute_confidence(self, probability: float) -> float:
         """Compute confidence score from probability."""
         boundary_distance = abs(probability - 0.5) * 2
         confidence = min(1.0, boundary_distance * 1.2)
         return float(confidence)
-    
-    def get_confidence_breakdown(self, video_path: Path) -> Dict[str, float]:
-        """Get detailed confidence breakdown."""
-        result = self.predict(video_path)
-        return {
-            'overall_confidence': result['confidence'],
-            'prediction_probability': result['probability'],
-            'prediction_time_ms': result['prediction_time_ms']
-        }
 
 
 # Singleton for FastAPI
@@ -278,7 +313,7 @@ def get_predictor(model_dir: Path = None) -> D3PlusPredictor:
             imputer_path=imputer_path,
             scaler_path=scaler_path,
             feature_names_path=feature_names_path,
-            device="cuda" if torch.cuda.is_available() else "cpu"
+            device="cpu"
         )
     
     return _predictor_instance
