@@ -1,16 +1,14 @@
 """
 api/app/main.py
-FastAPI application with report generation.
+FastAPI application for D3+ AI Video Detector.
 """
 
 import os
-import json
 import time
+import json
 import shutil
 from pathlib import Path
 from datetime import datetime
-from typing import Optional
-import tempfile
 
 import torch
 from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks
@@ -21,10 +19,9 @@ import uvicorn
 from api.app.config import settings
 from api.app.schemas import (
     PredictionResponse, HealthResponse, ErrorResponse,
-    DetailedReportResponse, FeatureBreakdown
+    BatchPredictionResponse, DetailedReportResponse
 )
-from api.app.dependencies import get_video_processor, get_predictor_dependency
-from shared.video_processor import VideoProcessor
+from api.app.dependencies import get_predictor_singleton, get_video_processor_singleton
 
 # Create directories
 settings.temp_dir.mkdir(parents=True, exist_ok=True)
@@ -40,25 +37,34 @@ app = FastAPI(
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.allowed_origins,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Initialize components
-video_processor = get_video_processor()
-predictor = get_predictor_dependency()
+# Get singletons
+predictor = get_predictor_singleton()
+video_processor = get_video_processor_singleton()
 
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint."""
+    memory_mb = None
+    try:
+        import psutil
+        process = psutil.Process()
+        memory_mb = process.memory_info().rss / (1024 * 1024)
+    except:
+        pass
+    
     return HealthResponse(
         status="healthy",
         version=settings.api_version,
         model_loaded=True,
-        gpu_available=torch.cuda.is_available()
+        gpu_available=torch.cuda.is_available(),
+        memory_usage_mb=memory_mb
     )
 
 
@@ -79,8 +85,8 @@ async def predict_video(
             detail=f"File type not supported. Allowed: {', '.join(settings.allowed_extensions)}"
         )
     
-    # Validate file size
-    file_size = await file.size()
+    # Validate file size - FIXED: file.size is an attribute, not a method
+    file_size = file.size
     if file_size > settings.max_file_size_mb * 1024 * 1024:
         raise HTTPException(
             status_code=400,
@@ -99,10 +105,13 @@ async def predict_video(
         raise HTTPException(status_code=500, detail=f"File save failed: {e}")
     
     try:
-        # Run prediction
-        result = predictor.predict(video_path)
+        # Process video and get frames
+        frames = video_processor.process_video(video_path)
         
-        # Generate detailed report
+        # Run prediction
+        result = predictor.predict(frames, video_path)
+        
+        # Generate report
         report = generate_detailed_report(video_path, result, video_id)
         
         # Save report
@@ -112,7 +121,6 @@ async def predict_video(
         
         # Clean up
         background_tasks.add_task(lambda: os.remove(video_path))
-        background_tasks.add_task(lambda: os.remove(report_path))  # Optional
         
         total_time = (time.time() - start_time) * 1000
         
@@ -121,7 +129,7 @@ async def predict_video(
             is_ai_generated=result['is_ai_generated'],
             confidence_score=result['confidence'],
             probability=result['probability'],
-            prediction_time_ms=result['prediction_time_ms'],
+            prediction_time_ms=result.get('prediction_time_ms', 0),
             total_time_ms=total_time,
             report=report,
             status="success"
@@ -130,6 +138,40 @@ async def predict_video(
     except Exception as e:
         background_tasks.add_task(lambda: os.remove(video_path))
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/predict/batch", response_model=BatchPredictionResponse)
+async def predict_batch(
+    background_tasks: BackgroundTasks,
+    files: list[UploadFile] = File(...)
+):
+    """
+    Predict for multiple videos.
+    """
+    if len(files) > 5:
+        raise HTTPException(
+            status_code=400,
+            detail="Maximum 5 videos per batch request"
+        )
+    
+    results = []
+    start_time = time.time()
+    
+    for file in files:
+        try:
+            result = await predict_video(background_tasks, file)
+            results.append(result)
+        except Exception as e:
+            results.append({
+                "video_id": file.filename,
+                "error": str(e),
+                "status": "failed"
+            })
+    
+    return BatchPredictionResponse(
+        results=results,
+        total_time_ms=(time.time() - start_time) * 1000
+    )
 
 
 @app.get("/report/{video_id}")
@@ -162,9 +204,7 @@ async def download_report(video_id: str):
 
 
 def generate_detailed_report(video_path: Path, result: dict, video_id: str) -> dict:
-    """
-    Generate detailed report for a prediction.
-    """
+    """Generate detailed report for a prediction."""
     # Get video metadata
     try:
         import ffmpeg
@@ -247,7 +287,7 @@ async def http_exception_handler(request, exc):
 if __name__ == "__main__":
     uvicorn.run(
         "api.app.main:app",
-        host="0.0.0.0",
+        host="127.0.0.1",
         port=8000,
         reload=True
     )
