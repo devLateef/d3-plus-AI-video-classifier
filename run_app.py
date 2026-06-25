@@ -1,6 +1,7 @@
 """
 run_app.py
-Launcher for both FastAPI and Streamlit with email prompt bypass.
+Launcher for both FastAPI and Streamlit.
+Streamlit runs in headless mode to avoid email prompt.
 """
 
 import os
@@ -21,32 +22,56 @@ def run_api():
 
 
 def run_streamlit():
-    """Run Streamlit UI with all prompts disabled."""
+    """Run Streamlit UI in headless mode with all prompts disabled."""
     time.sleep(2)
     
-    # Set environment variables to disable all prompts
+    # Set ALL environment variables to disable prompts
     env = os.environ.copy()
     env['STREAMLIT_BROWSER_GATHER_USAGE_STATS'] = 'false'
-    env['STREAMLIT_SERVER_ENABLE_FILE_WATCHER'] = 'false'
+    env['STREAMLIT_SERVER_HEADLESS'] = 'true'
     env['STREAMLIT_TELEMETRY_ENABLED'] = 'false'
     env['STREAMLIT_CLIENT_SHOW_ERROR_DETAILS'] = 'false'
+    env['STREAMLIT_GLOBAL_DEVELOPMENT_MODE'] = 'false'
+    env['STREAMLIT_SERVER_ENABLE_FILE_WATCHER'] = 'false'
     
-    # Full command with all flags
+    # Create config directory if it doesn't exist
+    config_dir = Path.home() / ".streamlit"
+    config_dir.mkdir(exist_ok=True)
+    
+    # Write config file to disable email prompt
+    config_file = config_dir / "config.toml"
+    with open(config_file, 'w') as f:
+        f.write("""
+[global]
+gatherUsageStats = false
+developmentMode = false
+
+[browser]
+gatherUsageStats = false
+
+[server]
+headless = true
+enableCORS = false
+enableXsrfProtection = false
+port = 8501
+address = "0.0.0.0"
+        """)
+    
+    print(f"✅ Streamlit config written to {config_file}")
+    
+    # Command with headless flag
     cmd = [
         "streamlit", "run", "ui/streamlit_app.py",
         "--server.port", "8501",
         "--server.address", "0.0.0.0",
-        "--server.enableCORS", "false",
-        "--server.enableXsrfProtection", "false",
+        "--server.headless", "true",
         "--browser.gatherUsageStats", "false",
-        "--logger.level", "error",
-        "--global.developmentMode", "false"
+        "--logger.level", "error"
     ]
     
     print(f"Starting Streamlit: {' '.join(cmd)}")
-    print("Waiting for Streamlit to start...")
+    print("Waiting for Streamlit to start (headless mode)...")
     
-    # Run with env
     try:
         subprocess.run(cmd, env=env)
     except KeyboardInterrupt:
@@ -96,12 +121,12 @@ def main():
     # Start Streamlit
     print("\n" + "="*60)
     print("Starting Streamlit UI...")
-    print("This will open a browser window automatically.")
+    print("UI will be available at http://localhost:8501")
     print("="*60 + "\n")
     
     # Open browser after a short delay
     def open_browser():
-        time.sleep(3)
+        time.sleep(5)
         try:
             webbrowser.open("http://localhost:8501")
             print("\n🌐 Browser opened to http://localhost:8501")
