@@ -1,0 +1,28 @@
+{
+  "video_id": "vid_1782465276_id11_0006.mp4",
+  "timestamp": "2026-06-26T10:14:37.306906",
+  "prediction": {
+    "is_ai_generated": false,
+    "probability": 0.3091213793515896,
+    "confidence_score": 0.4581086895561849,
+    "raw_d3_score": 0.3091213793515896
+  },
+  "metadata": {
+    "duration": 10.534,
+    "size_bytes": 1373060,
+    "width": 950,
+    "height": 500,
+    "codec": "mpeg4",
+    "frame_rate": 30.0
+  },
+  "feature_breakdown": {
+    "d3_score": 0.3091213793515896,
+    "color_features": 0.5,
+    "temporal_features": 0.5
+  },
+  "interpretation": {
+    "confidence_level": "Low",
+    "summary": "This video appears to be authentic, but with moderate confidence. Consider additional verification."
+  },
+  "processing_time_ms": 106.69898986816406
+}

@@ -20,12 +20,12 @@ import seaborn as sns
 from pathlib import Path
 
 
-def train_on_features(file_path="full_features_with_gifs.csv", output_dir="trained_models"):
+def train_on_features(file_path="./data_csv/full_features_with_gifs.csv", output_dir="trained_models"):
     """
     Train classifiers on pre-extracted features.
     """
     print("="*60)
-    print("D3+ FAST TRAINING")
+    print("D3+ TRAINING")
     print("="*60)
     
     # Load features
@@ -224,7 +224,7 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('--features', type=str, default='full_features_with_gifs.csv',
+    parser.add_argument('--features', type=str, default='./data_csv/full_features_with_gifs.csv',
                        help='Path to features file')
     parser.add_argument('--output', type=str, default='trained_models',
                        help='Output directory')
