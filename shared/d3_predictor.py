@@ -1,6 +1,6 @@
 """
 shared/d3_predictor.py
-D3+ Predictor - Attempts to load D3 model from Hugging Face.
+D3+ Predictor - Properly handles XCLIP model input shapes.
 """
 
 import torch
@@ -21,8 +21,7 @@ from shared.video_processor import VideoProcessor
 
 class D3PlusPredictor:
     """
-    D3+ video predictor.
-    Attempts to load D3 model; falls back to simple features if not available.
+    D3+ video predictor with proper D3 model handling.
     """
     
     def __init__(
@@ -86,6 +85,7 @@ class D3PlusPredictor:
         start_time = time.time()
         
         print(f"\n🔍 Predicting: {video_path.name if video_path else 'unknown'}")
+        print(f"   Frames shape: {frames_tensor.shape}")
         
         features = self._extract_features_from_frames(frames_tensor, video_path)
         
@@ -126,23 +126,57 @@ class D3PlusPredictor:
         else:
             frames_np = frames_tensor
         
-        # 1. D3 Features (if available)
-        if self.d3_model is not None:
-            frames_tensor_device = frames_tensor.unsqueeze(0).to(self.device)
-            with torch.no_grad():
-                _, d3_avg, d3_std = self.d3_model(frames_tensor_device)
-                d3_avg = d3_avg.cpu().numpy()[0]
-                d3_std = d3_std.cpu().numpy()[0]
-        else:
-            d3_avg = 0.0
-            d3_std = 0.0
+        print(f"   Frames shape (numpy): {frames_np.shape}")
         
+        # ============================================================
+        # 1. D3 Features (if available)
+        # ============================================================
+        d3_avg = 0.0
+        d3_std = 0.0
+        
+        if self.d3_model is not None:
+            try:
+                # The D3 model expects: (batch, frames, channels, height, width)
+                # We need to ensure we have the right number of frames
+                # XCLIP expects 16 frames
+                n_frames = 16
+                if frames_tensor.shape[0] < n_frames:
+                    # Pad with zeros
+                    padded = torch.zeros(n_frames, frames_tensor.shape[1], frames_tensor.shape[2], frames_tensor.shape[3])
+                    padded[:frames_tensor.shape[0]] = frames_tensor
+                    frames_for_d3 = padded
+                else:
+                    # Take first 16 frames
+                    frames_for_d3 = frames_tensor[:n_frames]
+                
+                # Add batch dimension: (1, frames, channels, height, width)
+                frames_for_d3 = frames_for_d3.unsqueeze(0).to(self.device)
+                print(f"   D3 model input shape: {frames_for_d3.shape}")
+                
+                with torch.no_grad():
+                    _, d3_avg, d3_std = self.d3_model(frames_for_d3)
+                    d3_avg = d3_avg.cpu().numpy()[0]
+                    d3_std = d3_std.cpu().numpy()[0]
+                
+                print(f"   D3 features: avg={d3_avg:.4f}, std={d3_std:.4f}")
+                
+            except Exception as e:
+                print(f"   ⚠️ D3 model failed: {e}")
+                # Use fallback
+                d3_avg = 0.0
+                d3_std = 0.0
+        
+        # ============================================================
         # 2. Color features (192)
+        # ============================================================
         color_features = []
         n_frames = min(16, len(frames_np))
+        print(f"   Processing {n_frames} frames for color features")
         
         for frame_idx in range(n_frames):
             frame = frames_np[frame_idx]
+            
+            # Convert to (height, width, channels)
             if frame.shape[0] == 3:
                 frame_hwc = frame.transpose(1, 2, 0)
             else:
@@ -164,8 +198,11 @@ class D3PlusPredictor:
         while len(color_features) < 192:
             color_features.append(0.0)
         color_features = color_features[:192]
+        print(f"   Color features: {len(color_features)}")
         
+        # ============================================================
         # 3. Temporal features (3)
+        # ============================================================
         temporal_features = []
         if len(frames_np) > 1:
             diffs = []
@@ -174,27 +211,41 @@ class D3PlusPredictor:
                 diffs.append(diff)
             
             if diffs:
-                temporal_features = [np.mean(diffs), np.std(diffs), np.max(diffs)]
+                temporal_features = [
+                    float(np.mean(diffs)),
+                    float(np.std(diffs)),
+                    float(np.max(diffs))
+                ]
             else:
                 temporal_features = [0.0, 0.0, 0.0]
         else:
             temporal_features = [0.0, 0.0, 0.0]
         
-        # 4. Bitrate features (6)
-        bitrate_features = self._extract_bitrate_features(video_path)
+        print(f"   Temporal features: {len(temporal_features)}")
         
-        # Combine
+        # ============================================================
+        # 4. Bitrate features (6)
+        # ============================================================
+        bitrate_features = self._extract_bitrate_features(video_path)
+        print(f"   Bitrate features: {len(bitrate_features)}")
+        
+        # ============================================================
+        # 5. Combine
+        # ============================================================
         combined = np.concatenate([
-            [d3_avg, d3_std],
+            [float(d3_avg), float(d3_std)],
             np.array(color_features, dtype=np.float32),
             np.array(temporal_features, dtype=np.float32),
             np.array(bitrate_features, dtype=np.float32)
         ])
         
+        # Ensure exactly 203 features
         if len(combined) < 203:
             combined = np.pad(combined, (0, 203 - len(combined)), 'constant')
         elif len(combined) > 203:
             combined = combined[:203]
+        
+        print(f"   Final features: {len(combined)}")
         
         return np.array(combined, dtype=np.float32)
     
@@ -220,9 +271,17 @@ class D3PlusPredictor:
             
             format_info = data.get('format', {})
             
+            bitrate = float(video_stream.get('bit_rate', 0))
+            frame_rate_str = video_stream.get('avg_frame_rate', '0/1')
+            if '/' in frame_rate_str:
+                num, den = frame_rate_str.split('/')
+                frame_rate = float(num) / float(den) if float(den) > 0 else 0
+            else:
+                frame_rate = float(frame_rate_str)
+            
             return np.array([
-                float(video_stream.get('bit_rate', 0)),
-                float(eval(video_stream.get('avg_frame_rate', '0/1'))),
+                bitrate,
+                frame_rate,
                 float(video_stream.get('width', 0)),
                 float(video_stream.get('height', 0)),
                 float(format_info.get('duration', 0)),
@@ -258,7 +317,7 @@ def get_predictor(model_dir: Path = None) -> D3PlusPredictor:
             scaler_path=scaler_path,
             feature_names_path=feature_names_path,
             device="cpu",
-            use_d3=True  # Try to load from Hugging Face
+            use_d3=True
         )
     
     return _predictor_instance
