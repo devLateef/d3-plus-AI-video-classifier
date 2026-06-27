@@ -230,7 +230,6 @@ class D3PlusPredictor:
         Extract the 203 features from pre-processed frames.
         This MUST match your training feature extraction EXACTLY.
         """
-        import cv2
         from scipy.stats import skew, kurtosis
         
         # Convert frames to numpy
@@ -239,27 +238,39 @@ class D3PlusPredictor:
         else:
             frames_np = frames_tensor
         
+        print(f"   Frames shape: {frames_np.shape}")
+        
         # ============================================================
-        # 1. D3 Features (using the D3 model if available)
+        # 1. D3 Features (2 features)
         # ============================================================
         if self.d3_model is not None:
-            frames_tensor_device = frames_tensor.unsqueeze(0).to(self.device)
-            with torch.no_grad():
-                _, d3_avg, d3_score = self.d3_model(frames_tensor_device)
-                d3_avg = d3_avg.cpu().numpy()[0]
-                d3_std = d3_score.cpu().numpy()[0] if isinstance(d3_score, torch.Tensor) else d3_score
+            try:
+                frames_tensor_device = frames_tensor.unsqueeze(0).to(self.device)
+                with torch.no_grad():
+                    _, d3_avg, d3_score = self.d3_model(frames_tensor_device)
+                    d3_avg = d3_avg.cpu().numpy()[0]
+                    d3_std = d3_score.cpu().numpy()[0] if isinstance(d3_score, torch.Tensor) else d3_score
+            except Exception as e:
+                print(f"   ⚠️ D3 model inference failed: {e}")
+                d3_avg = 0.0
+                d3_std = 0.0
         else:
-            print("⚠️ WARNING: D3 model not loaded! Using fallback D3 features.")
+            print("   ⚠️ D3 model not loaded! Using fallback D3 features.")
             d3_avg = 0.0
             d3_std = 0.0
         
+        d3_features = [float(d3_avg), float(d3_std)]
+        print(f"   D3 features: {len(d3_features)}")
+        
         # ============================================================
-        # 2. Color Features (must match training)
+        # 2. Color Features (192 features: 16 frames * 3 channels * 4 stats)
         # ============================================================
         color_features = []
         
-        # Process exactly 16 frames (your training uses 16 frames)
+        # Process exactly 16 frames
         n_frames = min(16, len(frames_np))
+        print(f"   Processing {n_frames} frames for color features")
+        
         for frame_idx in range(n_frames):
             frame = frames_np[frame_idx]
             
@@ -289,15 +300,15 @@ class D3PlusPredictor:
         while len(color_features) < 192:
             color_features.append(0.0)
         color_features = color_features[:192]
+        print(f"   Color features: {len(color_features)}")
         
         # ============================================================
-        # 3. Temporal Features (must match training)
+        # 3. Temporal Features (3 features)
         # ============================================================
         temporal_features = []
         if len(frames_np) > 1:
             diffs = []
             for i in range(1, min(len(frames_np), 16)):
-                # Compute difference between consecutive frames
                 diff = np.mean(np.abs(frames_np[i] - frames_np[i-1]))
                 diffs.append(diff)
             
@@ -312,20 +323,27 @@ class D3PlusPredictor:
         else:
             temporal_features = [0.0, 0.0, 0.0]
         
-        # ============================================================
-        # 4. Bitrate Features (must match training)
-        # ============================================================
-        bitrate_features = self._extract_bitrate_features(video_path)
+        print(f"   Temporal features: {len(temporal_features)}")
         
         # ============================================================
-        # 5. Combine ALL features in the SAME ORDER as training
+        # 4. Bitrate Features (6 features)
         # ============================================================
-        combined = [d3_avg, d3_std] + color_features + temporal_features + bitrate_features
+        bitrate_features = self._extract_bitrate_features(video_path)
+        print(f"   Bitrate features: {len(bitrate_features)}")
+        
+        # ============================================================
+        # 5. Combine ALL features
+        # ============================================================
+        combined = d3_features + color_features + temporal_features + list(bitrate_features)
+        
+        print(f"   Combined before padding: {len(combined)}")
         
         # Ensure exactly 203 features
         while len(combined) < 203:
             combined.append(0.0)
         combined = combined[:203]
+        
+        print(f"   Final features: {len(combined)}")
         
         # Convert to numpy array
         return np.array(combined, dtype=np.float32)
@@ -335,7 +353,16 @@ class D3PlusPredictor:
         Extract bitrate features from video file.
         Matches training bitrate extraction.
         """
-        if video_path is None or not video_path.exists():
+        print(f"   Extracting bitrate features for: {video_path}")
+        
+        # If video_path is None or doesn't exist, return zeros
+        if video_path is None:
+            print(f"   ⚠️ Video path is None")
+            return np.zeros(6)
+        
+        video_path = Path(video_path)
+        if not video_path.exists():
+            print(f"   ⚠️ Video path doesn't exist: {video_path}")
             return np.zeros(6)
         
         try:
@@ -351,6 +378,7 @@ class D3PlusPredictor:
             
             result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode != 0:
+                print(f"   ⚠️ ffprobe failed with return code {result.returncode}")
                 return np.zeros(6)
             
             data = json.loads(result.stdout)
@@ -363,22 +391,54 @@ class D3PlusPredictor:
                     break
             
             if video_stream is None:
+                print(f"   ⚠️ No video stream found")
                 return np.zeros(6)
             
             format_info = data.get('format', {})
             
             # Extract features (must match training)
             duration = float(format_info.get('duration', 0))
-            frame_count = int(video_stream.get('nb_frames', 0))
+            
+            # Get frame count
+            nb_frames = video_stream.get('nb_frames')
+            if nb_frames is None:
+                # Try to calculate from duration and frame rate
+                avg_frame_rate = video_stream.get('avg_frame_rate', '0/1')
+                if '/' in avg_frame_rate:
+                    num, den = avg_frame_rate.split('/')
+                    if float(den) > 0:
+                        frame_rate = float(num) / float(den)
+                        duration_float = float(format_info.get('duration', 0))
+                        frame_count = frame_rate * duration_float
+                    else:
+                        frame_count = 0
+                else:
+                    frame_count = 0
+            else:
+                frame_count = float(nb_frames)
+            
             width = int(video_stream.get('width', 0))
             height = int(video_stream.get('height', 0))
             file_size = int(format_info.get('size', 0)) / (1024 * 1024)  # MB
             is_gif = 0.0  # Not a GIF
             
-            return np.array([duration, float(frame_count), float(width), float(height), file_size, is_gif])
+            bitrate_features = np.array([
+                float(duration),
+                float(frame_count),
+                float(width),
+                float(height),
+                float(file_size),
+                float(is_gif)
+            ])
             
+            print(f"   Bitrate features: {bitrate_features}")
+            return bitrate_features
+            
+        except json.JSONDecodeError as e:
+            print(f"   ⚠️ JSON decode error: {e}")
+            return np.zeros(6)
         except Exception as e:
-            print(f"⚠️ Bitrate extraction error for {video_path}: {e}")
+            print(f"   ⚠️ Bitrate extraction error for {video_path}: {e}")
             return np.zeros(6)
     
     def _compute_confidence(self, probability: float) -> float:
