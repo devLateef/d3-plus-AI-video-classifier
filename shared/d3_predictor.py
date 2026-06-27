@@ -1,6 +1,7 @@
 """
 shared/d3_predictor.py
 D3+ Predictor for inference using scikit-learn models.
+FIXED: Proper feature extraction matching training pipeline.
 """
 
 import torch
@@ -10,6 +11,8 @@ import pandas as pd
 from pathlib import Path
 from typing import Dict, Optional
 import time
+import subprocess
+import json
 
 from shared.video_processor import VideoProcessor
 from shared.feature_extractor import FeatureExtractor
@@ -30,6 +33,7 @@ class D3PlusPredictor:
         imputer_path: Optional[Path] = None,
         scaler_path: Optional[Path] = None,
         feature_names_path: Optional[Path] = None,
+        d3_model_path: Optional[Path] = None,
         device: str = "cpu",
         threshold: float = 0.5
     ):
@@ -83,16 +87,21 @@ class D3PlusPredictor:
         self.video_processor = VideoProcessor()
         self.feature_extractor = FeatureExtractor()
         
-        # D3 model for feature extraction (load if needed)
+        # Load D3 model for feature extraction
         self.d3_model = None
+        if d3_model_path and d3_model_path.exists():
+            self.load_d3_model(d3_model_path)
+        else:
+            print(f"  ⚠️ No D3 model provided. Some features will use fallback values.")
         
         print(f"✅ D3PlusPredictor initialized on {self.device}")
         print(f"   Primary model: Random Forest")
     
     def load_d3_model(self, d3_model_path: Path):
-        """Load D3 model for feature extraction (optional)."""
+        """Load D3 model for feature extraction."""
         try:
             from research.models.d3_model import D3Model
+            print(f"Loading D3 model from {d3_model_path}...")
             self.d3_model = D3Model(encoder_type='XCLIP-16', loss_type='l2').to(self.device)
             self.d3_model.load_state_dict(torch.load(d3_model_path, map_location=self.device))
             self.d3_model.eval()
@@ -165,8 +174,20 @@ class D3PlusPredictor:
         """
         start_time = time.time()
         
+        # DIAGNOSTIC LOGGING
+        print(f"\n🔍 Predicting for video: {video_path.name if video_path else 'unknown'}")
+        print(f"   Frames tensor shape: {frames_tensor.shape}")
+        
         # Extract features from frames
         features = self._extract_features_from_frames(frames_tensor, video_path)
+        
+        # DIAGNOSTIC LOGGING
+        print(f"   Features extracted: {len(features)}")
+        print(f"   Features mean: {features.mean():.4f}")
+        print(f"   Features std: {features.std():.4f}")
+        print(f"   Features min: {features.min():.4f}")
+        print(f"   Features max: {features.max():.4f}")
+        print(f"   First 10 features: {features[:10]}")
         
         # Prepare features for model
         X = np.array([features])
@@ -174,16 +195,19 @@ class D3PlusPredictor:
         # Handle missing values and scale
         if self.imputer is not None:
             X_imputed = self.imputer.transform(X)
+            print(f"   After imputation - mean: {X_imputed.mean():.4f}, std: {X_imputed.std():.4f}")
         else:
             X_imputed = X
         
         if self.scaler is not None:
             X_scaled = self.scaler.transform(X_imputed)
+            print(f"   After scaling - mean: {X_scaled.mean():.4f}, std: {X_scaled.std():.4f}")
         else:
             X_scaled = X_imputed
         
         # Predict with Random Forest
         y_proba = self.model.predict_proba(X_scaled)[0]
+        print(f"   Prediction probabilities: [real={y_proba[0]:.4f}, fake={y_proba[1] if len(y_proba) > 1 else y_proba[0]:.4f}]")
         
         # Get probability of being fake (class 1)
         probability = y_proba[1] if len(y_proba) > 1 else y_proba[0]
@@ -204,10 +228,9 @@ class D3PlusPredictor:
     def _extract_features_from_frames(self, frames_tensor: torch.Tensor, video_path: Path) -> np.ndarray:
         """
         Extract the 203 features from pre-processed frames.
-        This replicates your feature extraction pipeline.
+        This MUST match your training feature extraction EXACTLY.
         """
         import cv2
-        import torch.nn.functional as F
         from scipy.stats import skew, kurtosis
         
         # Convert frames to numpy
@@ -216,7 +239,9 @@ class D3PlusPredictor:
         else:
             frames_np = frames_tensor
         
-        # Extract D3 features
+        # ============================================================
+        # 1. D3 Features (using the D3 model if available)
+        # ============================================================
         if self.d3_model is not None:
             frames_tensor_device = frames_tensor.unsqueeze(0).to(self.device)
             with torch.no_grad():
@@ -224,22 +249,35 @@ class D3PlusPredictor:
                 d3_avg = d3_avg.cpu().numpy()[0]
                 d3_std = d3_score.cpu().numpy()[0] if isinstance(d3_score, torch.Tensor) else d3_score
         else:
-            # Fallback: compute simple features
+            print("⚠️ WARNING: D3 model not loaded! Using fallback D3 features.")
             d3_avg = 0.0
             d3_std = 0.0
         
-        # Extract color features
+        # ============================================================
+        # 2. Color Features (must match training)
+        # ============================================================
         color_features = []
-        for frame_idx in range(min(16, len(frames_np))):
+        
+        # Process exactly 16 frames (your training uses 16 frames)
+        n_frames = min(16, len(frames_np))
+        for frame_idx in range(n_frames):
             frame = frames_np[frame_idx]
-            # frame is (C, H, W) or (H, W, C)
+            
+            # Convert to (height, width, channels) for channel extraction
             if frame.shape[0] == 3:
                 frame_hwc = frame.transpose(1, 2, 0)
             else:
                 frame_hwc = frame
             
-            for c in range(min(3, frame_hwc.shape[2])):
-                channel = frame_hwc[:, :, c].flatten()
+            # For each channel (R, G, B)
+            for c in range(3):
+                if c < frame_hwc.shape[2]:
+                    channel = frame_hwc[:, :, c].flatten()
+                else:
+                    # If frame has fewer than 3 channels, pad with zeros
+                    channel = np.zeros_like(frame_hwc[:, :, 0]).flatten()
+                
+                # Extract exactly the same statistics as training
                 color_features.extend([
                     float(np.mean(channel)),
                     float(np.std(channel)),
@@ -247,37 +285,101 @@ class D3PlusPredictor:
                     float(kurtosis(channel))
                 ])
         
-        # Pad color features to 192 (16 frames * 3 channels * 4 stats)
+        # Pad to exactly 192 features (16 frames * 3 channels * 4 stats)
         while len(color_features) < 192:
             color_features.append(0.0)
         color_features = color_features[:192]
         
-        # Extract temporal features
+        # ============================================================
+        # 3. Temporal Features (must match training)
+        # ============================================================
         temporal_features = []
         if len(frames_np) > 1:
             diffs = []
-            for i in range(1, len(frames_np)):
+            for i in range(1, min(len(frames_np), 16)):
+                # Compute difference between consecutive frames
                 diff = np.mean(np.abs(frames_np[i] - frames_np[i-1]))
                 diffs.append(diff)
+            
             if diffs:
-                temporal_features = [float(np.mean(diffs)), float(np.std(diffs)), float(np.max(diffs))]
+                temporal_features = [
+                    float(np.mean(diffs)),
+                    float(np.std(diffs)),
+                    float(np.max(diffs))
+                ]
             else:
                 temporal_features = [0.0, 0.0, 0.0]
         else:
             temporal_features = [0.0, 0.0, 0.0]
         
-        # Extract bitrate features (simplified)
-        bitrate_features = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        # ============================================================
+        # 4. Bitrate Features (must match training)
+        # ============================================================
+        bitrate_features = self._extract_bitrate_features(video_path)
         
-        # Combine all features
+        # ============================================================
+        # 5. Combine ALL features in the SAME ORDER as training
+        # ============================================================
         combined = [d3_avg, d3_std] + color_features + temporal_features + bitrate_features
         
-        # Ensure we have exactly 203 features
+        # Ensure exactly 203 features
         while len(combined) < 203:
             combined.append(0.0)
         combined = combined[:203]
         
-        return np.array(combined)
+        # Convert to numpy array
+        return np.array(combined, dtype=np.float32)
+    
+    def _extract_bitrate_features(self, video_path: Path) -> np.ndarray:
+        """
+        Extract bitrate features from video file.
+        Matches training bitrate extraction.
+        """
+        if video_path is None or not video_path.exists():
+            return np.zeros(6)
+        
+        try:
+            # Use ffprobe to get video metadata
+            cmd = [
+                'ffprobe',
+                '-v', 'quiet',
+                '-print_format', 'json',
+                '-show_streams',
+                '-show_format',
+                str(video_path)
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                return np.zeros(6)
+            
+            data = json.loads(result.stdout)
+            
+            # Find video stream
+            video_stream = None
+            for stream in data.get('streams', []):
+                if stream.get('codec_type') == 'video':
+                    video_stream = stream
+                    break
+            
+            if video_stream is None:
+                return np.zeros(6)
+            
+            format_info = data.get('format', {})
+            
+            # Extract features (must match training)
+            duration = float(format_info.get('duration', 0))
+            frame_count = int(video_stream.get('nb_frames', 0))
+            width = int(video_stream.get('width', 0))
+            height = int(video_stream.get('height', 0))
+            file_size = int(format_info.get('size', 0)) / (1024 * 1024)  # MB
+            is_gif = 0.0  # Not a GIF
+            
+            return np.array([duration, float(frame_count), float(width), float(height), file_size, is_gif])
+            
+        except Exception as e:
+            print(f"⚠️ Bitrate extraction error for {video_path}: {e}")
+            return np.zeros(6)
     
     def _compute_confidence(self, probability: float) -> float:
         """Compute confidence score from probability."""
@@ -302,6 +404,7 @@ def get_predictor(model_dir: Path = None) -> D3PlusPredictor:
         imputer_path = model_dir / "imputer.pkl"
         scaler_path = model_dir / "scaler.pkl"
         feature_names_path = model_dir / "feature_names.npy"
+        d3_model_path = model_dir / "d3_plus_model.pth"
         
         if not rf_path.exists():
             raise FileNotFoundError(f"Random Forest model not found at {rf_path}")
@@ -313,6 +416,7 @@ def get_predictor(model_dir: Path = None) -> D3PlusPredictor:
             imputer_path=imputer_path,
             scaler_path=scaler_path,
             feature_names_path=feature_names_path,
+            d3_model_path=d3_model_path if d3_model_path.exists() else None,
             device="cpu"
         )
     
