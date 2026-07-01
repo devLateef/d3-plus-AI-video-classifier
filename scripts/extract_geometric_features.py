@@ -11,7 +11,7 @@ WITH:
 - Confidence weighting
 """
 
-import os
+import torch
 import sys
 import numpy as np
 import cv2
@@ -477,7 +477,8 @@ def extract_geometric_features_enhanced(csv_path, dataset_root, output_path="geo
     """
     print("Loading Dlib model...")
     detector = dlib.get_frontal_face_detector()
-    predictor = dlib.shape_predictor("shape_predictor_81_face_landmarks.dat")
+    dlib_dat_path = '/home/cuab/Documents/shape_predictor_81_face_landmarks/shape_predictor_81_face_landmarks.dat'
+    predictor = dlib.shape_predictor(dlib_dat_path)
     
     # Initialize components
     kalman = LandmarkKalmanFilter()

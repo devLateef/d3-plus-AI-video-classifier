@@ -3,7 +3,6 @@ research/data/dataset.py
 Fully fixed: consistent frame size, proper tensor handling.
 """
 
-import os
 import re
 import cv2
 import torch
