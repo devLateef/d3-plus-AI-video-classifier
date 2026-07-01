@@ -141,7 +141,7 @@ class OpticalFlowFallback:
 
 
 # ============================================================
-# 3. FACE DETECTION WITH CONFIDENCE (FIXED)
+# 3. FACE DETECTION WITH CONFIDENCE (FULLY FIXED)
 # ============================================================
 
 def detect_face_with_confidence(frame, detector, predictor, min_confidence=0.7):
@@ -152,27 +152,59 @@ def detect_face_with_confidence(frame, detector, predictor, min_confidence=0.7):
         (landmarks, confidence) where confidence is based on detection quality
     """
     # ============================================================
-    # FIX: Handle different channel formats
+    # FIX: Convert frame to Dlib-compatible format (uint8, grayscale)
     # ============================================================
-    if len(frame.shape) == 2:
+    
+    # Step 1: Ensure frame is numpy array
+    if not isinstance(frame, np.ndarray):
+        frame = np.array(frame)
+    
+    # Step 2: Ensure frame is uint8
+    if frame.dtype != np.uint8:
+        if frame.max() <= 1.0:
+            # Float normalized [0, 1] → uint8 [0, 255]
+            frame = (frame * 255).astype(np.uint8)
+        else:
+            # Other types → uint8
+            frame = frame.astype(np.uint8)
+    
+    # Step 3: Convert to grayscale if needed
+    if len(frame.shape) == 3 and frame.shape[2] == 3:
+        # BGR/RGB → Grayscale
+        # Check if it's BGR or RGB by looking at channel order
+        # Most OpenCV frames are BGR, but yours might be RGB
+        try:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        except:
+            try:
+                gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+            except:
+                # Fallback: take mean of channels
+                gray = np.mean(frame, axis=2).astype(np.uint8)
+    elif len(frame.shape) == 3 and frame.shape[2] == 1:
+        # Single channel (already grayscale)
+        gray = frame[:, :, 0]
+    elif len(frame.shape) == 2:
         # Already grayscale
         gray = frame
-    elif len(frame.shape) == 3 and frame.shape[2] == 1:
-        # Single channel image (grayscale with shape)
-        gray = frame[:, :, 0]
-    elif len(frame.shape) == 3 and frame.shape[2] == 3:
-        # BGR image (3 channels)
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     else:
         # Fallback: try to convert
         try:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         except:
-            # If all else fails, convert to uint8 and use first channel
-            gray = frame.astype(np.uint8)
-            if len(gray.shape) > 2:
-                gray = gray[:, :, 0]
+            gray = np.mean(frame, axis=2).astype(np.uint8) if len(frame.shape) > 2 else frame.astype(np.uint8)
     
+    # Step 4: Ensure grayscale is uint8
+    if gray.dtype != np.uint8:
+        if gray.max() <= 1.0:
+            gray = (gray * 255).astype(np.uint8)
+        else:
+            gray = gray.astype(np.uint8)
+    
+    # Step 5: Make sure the image is contiguous (Dlib requirement)
+    gray = np.ascontiguousarray(gray)
+    
+    # Step 6: Detect face
     faces = detector(gray)
     
     if len(faces) == 0:
@@ -194,7 +226,7 @@ def detect_face_with_confidence(frame, detector, predictor, min_confidence=0.7):
         confidence = min(1.0, size_ratio * 5.0)
         
         return points, confidence
-    except:
+    except Exception as e:
         return None, 0.0
 
 
@@ -524,10 +556,12 @@ def extract_geometric_features_enhanced(csv_path, dataset_root, output_path="geo
         if label.numpy()[0] == 0:  # Real video
             frames_np = frames.cpu().numpy()
             for frame in frames_np[:5]:  # Use first 5 frames
+                # Convert frame to HWC if needed
                 if frame.shape[0] == 3:
                     frame_hwc = frame.transpose(1, 2, 0)
                 else:
                     frame_hwc = frame
+                
                 landmarks, _ = detect_face_with_confidence(frame_hwc, detector, predictor)
                 if landmarks is not None and len(landmarks) == 81:
                     real_landmarks.append(landmarks.flatten())
@@ -552,6 +586,7 @@ def extract_geometric_features_enhanced(csv_path, dataset_root, output_path="geo
         prev_frame = None
         
         for frame in frames_np:
+            # Convert frame to HWC if needed
             if frame.shape[0] == 3:
                 frame_hwc = frame.transpose(1, 2, 0)
             else:
