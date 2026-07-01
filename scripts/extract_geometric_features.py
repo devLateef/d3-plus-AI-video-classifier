@@ -141,7 +141,7 @@ class OpticalFlowFallback:
 
 
 # ============================================================
-# 3. FACE DETECTION WITH CONFIDENCE
+# 3. FACE DETECTION WITH CONFIDENCE (FIXED)
 # ============================================================
 
 def detect_face_with_confidence(frame, detector, predictor, min_confidence=0.7):
@@ -151,7 +151,28 @@ def detect_face_with_confidence(frame, detector, predictor, min_confidence=0.7):
     Returns:
         (landmarks, confidence) where confidence is based on detection quality
     """
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    # ============================================================
+    # FIX: Handle different channel formats
+    # ============================================================
+    if len(frame.shape) == 2:
+        # Already grayscale
+        gray = frame
+    elif len(frame.shape) == 3 and frame.shape[2] == 1:
+        # Single channel image (grayscale with shape)
+        gray = frame[:, :, 0]
+    elif len(frame.shape) == 3 and frame.shape[2] == 3:
+        # BGR image (3 channels)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    else:
+        # Fallback: try to convert
+        try:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        except:
+            # If all else fails, convert to uint8 and use first channel
+            gray = frame.astype(np.uint8)
+            if len(gray.shape) > 2:
+                gray = gray[:, :, 0]
+    
     faces = detector(gray)
     
     if len(faces) == 0:
@@ -497,7 +518,6 @@ def extract_geometric_features_enhanced(csv_path, dataset_root, output_path="geo
     print("Note: Features include Mahalanobis distance (for anomaly detection)")
     
     # First pass: collect landmarks for Mahalanobis fitting
-    # (We'll fit on a subset of real faces)
     real_landmarks = []
     
     for idx, (frames, label) in enumerate(tqdm(loader, desc="Collecting reference landmarks")):
