@@ -7,11 +7,15 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import timm
-from transformers import (
-    CLIPVisionModel, 
-    XCLIPVisionModel, 
-    AutoModel,
-)
+# from transformers import (
+#     CLIPVisionModel, 
+#     XCLIPVisionModel, 
+#     AutoModel,
+# )
+from transformers import AutoModel
+from transformers.models.clip.modeling_clip import CLIPVisionModel
+from transformers.models.x_clip.modeling_x_clip import XCLIPVisionModel
+
 import torchvision.models as models
 import warnings
 warnings.filterwarnings("ignore")

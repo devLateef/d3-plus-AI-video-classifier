@@ -34,7 +34,7 @@ def merge_features():
     
     # Load D3-X features
     print("\n📂 Loading D3-X features from: full_features_with_gifs.csv")
-    d3x_df = pd.read_csv('full_features_with_gifs.csv')
+    d3x_df = pd.read_csv('data_csv/full_features_with_gifs.csv')
     print(f"   D3-X features shape: {d3x_df.shape}")
     
     # Check if sample counts match
