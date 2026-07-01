@@ -1,22 +1,21 @@
 """
 research/models/d3_model.py
-FIXED: AutoModel with XCLIP fallback.
+WORKING VERSION: Uses CLIPVisionModel directly.
 """
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import timm
 import torchvision.models as models
 import warnings
 warnings.filterwarnings('ignore')
 
-from transformers import AutoModel
+from transformers import CLIPVisionModel
 
 
 class D3Model(nn.Module):
     """
-    D3 Model with proper gradient flow.
+    D3 Model using CLIPVisionModel (no AutoModel issues).
     """
     
     def __init__(self, encoder_type: str = 'CLIP-16', loss_type: str = 'l2'):
@@ -24,58 +23,23 @@ class D3Model(nn.Module):
         self.loss_type = loss_type
         self.encoder_type = encoder_type
         
-        # Initialize encoder using AutoModel
-        try:
-            if encoder_type == 'CLIP-16':
-                self.encoder = AutoModel.from_pretrained("openai/clip-vit-base-patch16")
-            elif encoder_type == 'CLIP-32':
-                self.encoder = AutoModel.from_pretrained("openai/clip-vit-base-patch32")
-            elif encoder_type == 'XCLIP-16':
-                # Try XCLIP - if it fails, fallback to CLIP
-                try:
-                    self.encoder = AutoModel.from_pretrained("microsoft/xclip-base-patch16")
-                except Exception as e:
-                    print(f"⚠️ XCLIP failed: {e}")
-                    print("   Falling back to CLIP-16")
-                    self.encoder = AutoModel.from_pretrained("openai/clip-vit-base-patch16")
-            elif encoder_type == 'XCLIP-32':
-                try:
-                    self.encoder = AutoModel.from_pretrained("microsoft/xclip-base-patch32")
-                except Exception as e:
-                    print(f"⚠️ XCLIP failed: {e}")
-                    print("   Falling back to CLIP-32")
-                    self.encoder = AutoModel.from_pretrained("openai/clip-vit-base-patch32")
-            elif encoder_type == 'DINO-base':
-                self.encoder = AutoModel.from_pretrained("facebook/dinov2-base")
-            elif encoder_type == 'DINO-large':
-                self.encoder = AutoModel.from_pretrained("facebook/dinov2-large")
-            elif encoder_type == 'ResNet-18':
-                resnet = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
-                self.encoder = nn.Sequential(*list(resnet.children())[:-1])
-            elif encoder_type == 'VGG-16':
-                vgg = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1)
-                self.encoder = nn.Sequential(*list(vgg.children())[:-1])
-            elif encoder_type == 'EfficientNet-b4':
-                effnet = models.efficientnet_b4(weights=models.EfficientNet_B4_Weights.IMAGENET1K_V1)
-                self.encoder = nn.Sequential(*list(effnet.children())[:-1])
-            elif encoder_type == 'MobileNet-v3':
-                mobilenet = timm.create_model('mobilenetv3_large_100', pretrained=True)
-                self.encoder = nn.Sequential(*list(mobilenet.children())[:-1])
-            else:
-                raise ValueError(f"Unsupported encoder: {encoder_type}")
-        except Exception as e:
-            print(f"❌ Failed to load {encoder_type}: {e}")
-            print("   Falling back to CLIP-16")
-            self.encoder = AutoModel.from_pretrained("openai/clip-vit-base-patch16")
+        # Initialize CLIPVisionModel directly
+        if encoder_type == 'CLIP-16':
+            self.encoder = CLIPVisionModel.from_pretrained("openai/clip-vit-base-patch16")
+        elif encoder_type == 'CLIP-32':
+            self.encoder = CLIPVisionModel.from_pretrained("openai/clip-vit-base-patch32")
+        elif encoder_type == 'ResNet-18':
+            resnet = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
+            self.encoder = nn.Sequential(*list(resnet.children())[:-1])
+        else:
+            # Default to CLIP-16
+            self.encoder = CLIPVisionModel.from_pretrained("openai/clip-vit-base-patch16")
         
         # FREEZE encoder
         for param in self.encoder.parameters():
             param.requires_grad = False
         
-        # Get feature dimension
-        self.feature_dim = self._get_feature_dim()
-        
-        # Classifier head
+        # Classifier head (trainable)
         self.classifier = nn.Sequential(
             nn.Linear(2, 32),
             nn.ReLU(),
@@ -90,21 +54,6 @@ class D3Model(nn.Module):
         trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
         print(f"Model: {total_params:,} params ({trainable_params:,} trainable)")
     
-    def _get_feature_dim(self):
-        """Get feature dimension from encoder."""
-        try:
-            dummy = torch.zeros(1, 3, 224, 224)
-            with torch.no_grad():
-                output = self.encoder(dummy)
-                if hasattr(output, 'pooler_output') and output.pooler_output is not None:
-                    return output.pooler_output.shape[-1]
-                elif hasattr(output, 'last_hidden_state'):
-                    return output.last_hidden_state.shape[-1]
-                elif isinstance(output, torch.Tensor):
-                    return output.shape[-1]
-        except:
-            return 768  # Default for CLIP
-    
     def forward(self, x: torch.Tensor) -> tuple:
         """
         Forward pass with proper gradient flow.
@@ -114,16 +63,14 @@ class D3Model(nn.Module):
         # Reshape for encoder
         images = x.reshape(-1, c, h, w)
         
-        # Extract features using AutoModel
-        outputs = self.encoder(images)
-        
-        # Handle different output types
-        if hasattr(outputs, 'pooler_output') and outputs.pooler_output is not None:
+        # Extract features using CLIPVisionModel
+        if self.encoder_type.startswith('CLIP'):
+            outputs = self.encoder(images, output_hidden_states=True)
             features = outputs.pooler_output
-        elif hasattr(outputs, 'last_hidden_state'):
-            features = outputs.last_hidden_state[:, 0, :]  # CLS token
         else:
-            features = outputs
+            # ResNet
+            features = self.encoder(images)
+            features = features.view(features.size(0), -1)
         
         # Reshape to (batch, frames, features)
         features = features.reshape(b, t, -1)
