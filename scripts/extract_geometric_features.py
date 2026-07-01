@@ -141,7 +141,7 @@ class OpticalFlowFallback:
 
 
 # ============================================================
-# 3. FACE DETECTION WITH CONFIDENCE (FULLY FIXED)
+# 3. FACE DETECTION WITH CONFIDENCE (ROBUST VERSION)
 # ============================================================
 
 def detect_face_with_confidence(frame, detector, predictor, min_confidence=0.7):
@@ -152,59 +152,76 @@ def detect_face_with_confidence(frame, detector, predictor, min_confidence=0.7):
         (landmarks, confidence) where confidence is based on detection quality
     """
     # ============================================================
-    # FIX: Convert frame to Dlib-compatible format (uint8, grayscale)
+    # STEP 1: Force frame to be a numpy array with proper shape
     # ============================================================
-    
-    # Step 1: Ensure frame is numpy array
     if not isinstance(frame, np.ndarray):
         frame = np.array(frame)
     
-    # Step 2: Ensure frame is uint8
+    # ============================================================
+    # STEP 2: Force to uint8 [0, 255] range
+    # ============================================================
     if frame.dtype != np.uint8:
         if frame.max() <= 1.0:
             # Float normalized [0, 1] → uint8 [0, 255]
-            frame = (frame * 255).astype(np.uint8)
+            frame = (frame * 255).clip(0, 255).astype(np.uint8)
         else:
             # Other types → uint8
             frame = frame.astype(np.uint8)
+            frame = np.clip(frame, 0, 255)
     
-    # Step 3: Convert to grayscale if needed
-    if len(frame.shape) == 3 and frame.shape[2] == 3:
-        # BGR/RGB → Grayscale
-        # Check if it's BGR or RGB by looking at channel order
-        # Most OpenCV frames are BGR, but yours might be RGB
-        try:
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        except:
+    # ============================================================
+    # STEP 3: Handle different channel configurations
+    # ============================================================
+    if len(frame.shape) == 3:
+        if frame.shape[2] == 3:
+            # RGB/BGR image
+            # Convert to grayscale using OpenCV (BGR is default)
             try:
-                gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             except:
-                # Fallback: take mean of channels
-                gray = np.mean(frame, axis=2).astype(np.uint8)
-    elif len(frame.shape) == 3 and frame.shape[2] == 1:
-        # Single channel (already grayscale)
-        gray = frame[:, :, 0]
+                try:
+                    gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+                except:
+                    # If both fail, use luminance formula
+                    gray = (0.299 * frame[:, :, 0] + 0.587 * frame[:, :, 1] + 0.114 * frame[:, :, 2]).astype(np.uint8)
+        elif frame.shape[2] == 1:
+            gray = frame[:, :, 0]
+        else:
+            # Unknown channel count - use first channel
+            gray = frame[:, :, 0]
     elif len(frame.shape) == 2:
-        # Already grayscale
         gray = frame
     else:
-        # Fallback: try to convert
+        # Fallback: flatten and reshape
         try:
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            gray = frame.reshape(frame.shape[0], frame.shape[1]).astype(np.uint8)
         except:
-            gray = np.mean(frame, axis=2).astype(np.uint8) if len(frame.shape) > 2 else frame.astype(np.uint8)
+            raise ValueError(f"Unable to process frame with shape {frame.shape}")
     
-    # Step 4: Ensure grayscale is uint8
+    # ============================================================
+    # STEP 4: Ensure grayscale is uint8 and contiguous
+    # ============================================================
     if gray.dtype != np.uint8:
         if gray.max() <= 1.0:
-            gray = (gray * 255).astype(np.uint8)
+            gray = (gray * 255).clip(0, 255).astype(np.uint8)
         else:
-            gray = gray.astype(np.uint8)
+            gray = np.clip(gray, 0, 255).astype(np.uint8)
     
-    # Step 5: Make sure the image is contiguous (Dlib requirement)
-    gray = np.ascontiguousarray(gray)
+    # Force contiguous memory layout (Dlib requirement)
+    gray = np.ascontiguousarray(gray, dtype=np.uint8)
     
-    # Step 6: Detect face
+    # ============================================================
+    # STEP 5: Final verification before Dlib
+    # ============================================================
+    if gray.ndim != 2:
+        raise ValueError(f"Grayscale image must be 2D, got shape {gray.shape}")
+    
+    if gray.dtype != np.uint8:
+        raise ValueError(f"Grayscale image must be uint8, got dtype {gray.dtype}")
+    
+    # ============================================================
+    # STEP 6: Detect face
+    # ============================================================
     faces = detector(gray)
     
     if len(faces) == 0:
@@ -217,12 +234,10 @@ def detect_face_with_confidence(frame, detector, predictor, min_confidence=0.7):
         landmarks = predictor(gray, largest_face)
         points = np.array([[p.x, p.y] for p in landmarks.parts()])
         
-        # Calculate confidence based on face size and detection quality
+        # Calculate confidence based on face size
         face_area = largest_face.width() * largest_face.height()
         img_area = frame.shape[0] * frame.shape[1]
         size_ratio = face_area / img_area
-        
-        # Higher confidence for larger faces
         confidence = min(1.0, size_ratio * 5.0)
         
         return points, confidence
