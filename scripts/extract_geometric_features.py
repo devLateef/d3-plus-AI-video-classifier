@@ -141,7 +141,7 @@ class OpticalFlowFallback:
 
 
 # ============================================================
-# 3. FACE DETECTION WITH CONFIDENCE (ROBUST VERSION)
+# 3. FACE DETECTION WITH CONFIDENCE
 # ============================================================
 
 def detect_face_with_confidence(frame, detector, predictor, min_confidence=0.7):
@@ -152,7 +152,7 @@ def detect_face_with_confidence(frame, detector, predictor, min_confidence=0.7):
         (landmarks, confidence) where confidence is based on detection quality
     """
     # ============================================================
-    # STEP 1: Force frame to be a numpy array with proper shape
+    # STEP 1: Force frame to be a numpy array
     # ============================================================
     if not isinstance(frame, np.ndarray):
         frame = np.array(frame)
@@ -162,10 +162,8 @@ def detect_face_with_confidence(frame, detector, predictor, min_confidence=0.7):
     # ============================================================
     if frame.dtype != np.uint8:
         if frame.max() <= 1.0:
-            # Float normalized [0, 1] → uint8 [0, 255]
             frame = (frame * 255).clip(0, 255).astype(np.uint8)
         else:
-            # Other types → uint8
             frame = frame.astype(np.uint8)
             frame = np.clip(frame, 0, 255)
     
@@ -174,29 +172,21 @@ def detect_face_with_confidence(frame, detector, predictor, min_confidence=0.7):
     # ============================================================
     if len(frame.shape) == 3:
         if frame.shape[2] == 3:
-            # RGB/BGR image
-            # Convert to grayscale using OpenCV (BGR is default)
             try:
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             except:
                 try:
                     gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
                 except:
-                    # If both fail, use luminance formula
                     gray = (0.299 * frame[:, :, 0] + 0.587 * frame[:, :, 1] + 0.114 * frame[:, :, 2]).astype(np.uint8)
         elif frame.shape[2] == 1:
             gray = frame[:, :, 0]
         else:
-            # Unknown channel count - use first channel
             gray = frame[:, :, 0]
     elif len(frame.shape) == 2:
         gray = frame
     else:
-        # Fallback: flatten and reshape
-        try:
-            gray = frame.reshape(frame.shape[0], frame.shape[1]).astype(np.uint8)
-        except:
-            raise ValueError(f"Unable to process frame with shape {frame.shape}")
+        raise ValueError(f"Unable to process frame with shape {frame.shape}")
     
     # ============================================================
     # STEP 4: Ensure grayscale is uint8 and contiguous
@@ -207,34 +197,22 @@ def detect_face_with_confidence(frame, detector, predictor, min_confidence=0.7):
         else:
             gray = np.clip(gray, 0, 255).astype(np.uint8)
     
-    # Force contiguous memory layout (Dlib requirement)
     gray = np.ascontiguousarray(gray, dtype=np.uint8)
     
     # ============================================================
-    # STEP 5: Final verification before Dlib
-    # ============================================================
-    if gray.ndim != 2:
-        raise ValueError(f"Grayscale image must be 2D, got shape {gray.shape}")
-    
-    if gray.dtype != np.uint8:
-        raise ValueError(f"Grayscale image must be uint8, got dtype {gray.dtype}")
-    
-    # ============================================================
-    # STEP 6: Detect face
+    # STEP 5: Detect face
     # ============================================================
     faces = detector(gray)
     
     if len(faces) == 0:
         return None, 0.0
     
-    # Use the largest face
     largest_face = max(faces, key=lambda rect: rect.width() * rect.height())
     
     try:
         landmarks = predictor(gray, largest_face)
         points = np.array([[p.x, p.y] for p in landmarks.parts()])
         
-        # Calculate confidence based on face size
         face_area = largest_face.width() * largest_face.height()
         img_area = frame.shape[0] * frame.shape[1]
         size_ratio = face_area / img_area
@@ -256,7 +234,6 @@ def normalize_face(landmarks, target_eye_distance=60):
     if landmarks is None:
         return None
     
-    # Compute eye distance
     left_eye_center = np.mean(landmarks[36:42], axis=0)
     right_eye_center = np.mean(landmarks[42:48], axis=0)
     eye_distance = np.linalg.norm(left_eye_center - right_eye_center)
@@ -264,10 +241,7 @@ def normalize_face(landmarks, target_eye_distance=60):
     if eye_distance < 1e-6:
         return landmarks
     
-    # Compute scaling factor
     scale = target_eye_distance / eye_distance
-    
-    # Center the face
     face_center = np.mean(landmarks, axis=0)
     normalized = (landmarks - face_center) * scale + face_center
     
@@ -329,25 +303,16 @@ class MahalanobisDetector:
         self.is_fitted = False
     
     def fit(self, landmark_vectors):
-        """
-        Fit reference distribution from real faces.
-        
-        Args:
-            landmark_vectors: List of flattened landmark vectors (162,)
-        """
         if len(landmark_vectors) < 2:
             return
         
         X = np.array(landmark_vectors)
         self.mu = np.mean(X, axis=0)
         S = np.cov(X, rowvar=False)
-        
-        # Pseudo-inverse for stability
         self.S_inv = np.linalg.pinv(S + np.eye(S.shape[0]) * 1e-6)
         self.is_fitted = True
     
     def compute_distance(self, landmarks):
-        """Compute Mahalanobis distance for a face."""
         if not self.is_fitted or landmarks is None:
             return 0.0
         
@@ -360,37 +325,23 @@ class MahalanobisDetector:
 # ============================================================
 
 def compute_distances(landmarks):
-    """Compute inter-landmark distances."""
     distances = []
     
-    # Eye widths
     distances.append(np.linalg.norm(landmarks[36] - landmarks[39]))
     distances.append(np.linalg.norm(landmarks[42] - landmarks[45]))
-    
-    # Eye heights
     distances.append(np.linalg.norm(landmarks[37] - landmarks[41]))
     distances.append(np.linalg.norm(landmarks[43] - landmarks[47]))
-    
-    # Mouth width and height
     distances.append(np.linalg.norm(landmarks[48] - landmarks[54]))
     distances.append(np.linalg.norm(landmarks[51] - landmarks[57]))
-    
-    # Nose width
     distances.append(np.linalg.norm(landmarks[31] - landmarks[35]))
     
-    # Eye-to-nose
     left_eye_center = np.mean(landmarks[36:42], axis=0)
     nose_tip = landmarks[30]
     distances.append(np.linalg.norm(left_eye_center - nose_tip))
-    
-    # Jaw width
     distances.append(np.linalg.norm(landmarks[2] - landmarks[14]))
-    
-    # Forehead
     distances.append(np.linalg.norm(landmarks[69] - landmarks[75]))
     distances.append(np.linalg.norm(landmarks[69] - landmarks[81]))
     
-    # Eye spacing
     right_eye_center = np.mean(landmarks[42:48], axis=0)
     distances.append(np.linalg.norm(left_eye_center - right_eye_center))
     
@@ -398,7 +349,6 @@ def compute_distances(landmarks):
 
 
 def compute_ratios(landmarks):
-    """Compute geometric ratios."""
     ratios = []
     
     def ear(eye_indices):
@@ -411,21 +361,17 @@ def compute_ratios(landmarks):
     ratios.append(ear([36, 37, 38, 39, 40, 41]))
     ratios.append(ear([42, 43, 44, 45, 46, 47]))
     
-    # Mouth ratio
     vertical_1 = np.linalg.norm(landmarks[51] - landmarks[57])
     vertical_2 = np.linalg.norm(landmarks[52] - landmarks[56])
     horizontal = np.linalg.norm(landmarks[48] - landmarks[54])
     ratios.append((vertical_1 + vertical_2) / (2.0 * horizontal + 1e-6))
     
-    # Eye spacing ratio
     face_width = np.linalg.norm(landmarks[0] - landmarks[16])
     ratios.append(np.linalg.norm(left_eye_center - right_eye_center) / (face_width + 1e-6))
     
-    # Forehead ratio
     face_height = np.linalg.norm(landmarks[8] - landmarks[27])
     ratios.append(np.linalg.norm(landmarks[69] - landmarks[81]) / (face_height + 1e-6))
     
-    # Eye symmetry
     ratios.append(np.linalg.norm(landmarks[36] - landmarks[39]) / 
                   (np.linalg.norm(landmarks[42] - landmarks[45]) + 1e-6))
     
@@ -433,7 +379,6 @@ def compute_ratios(landmarks):
 
 
 def compute_angles(landmarks):
-    """Compute angles between facial landmarks."""
     angles = []
     
     def angle_between(a, b, c):
@@ -442,35 +387,24 @@ def compute_angles(landmarks):
         cos_angle = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2) + 1e-6)
         return np.arccos(np.clip(cos_angle, -1.0, 1.0)) * 180 / np.pi
     
-    # Head tilt
     left_eye_center = np.mean(landmarks[36:42], axis=0)
     right_eye_center = np.mean(landmarks[42:48], axis=0)
     head_tilt = np.arctan2(right_eye_center[1] - left_eye_center[1],
                            right_eye_center[0] - left_eye_center[0]) * 180 / np.pi
     angles.append(head_tilt)
     
-    # Jaw angle
     angles.append(angle_between(landmarks[2], landmarks[8], landmarks[14]))
-    
-    # Nose angle
     angles.append(angle_between(landmarks[27], landmarks[30], landmarks[33]))
-    
-    # Eye corner angles
     angles.append(angle_between(landmarks[36], landmarks[39], landmarks[37]))
     angles.append(angle_between(landmarks[42], landmarks[45], landmarks[43]))
-    
-    # Mouth angles
     angles.append(angle_between(landmarks[48], landmarks[51], landmarks[54]))
     angles.append(angle_between(landmarks[48], landmarks[57], landmarks[54]))
-    
-    # Forehead angle
     angles.append(angle_between(landmarks[69], landmarks[75], landmarks[81]))
     
     return np.array(angles)
 
 
 def compute_forehead_features(landmarks):
-    """Extract forehead features (points 69-81)."""
     forehead = []
     forehead_points = landmarks[69:82]
     
@@ -488,7 +422,6 @@ def compute_forehead_features(landmarks):
 
 
 def compute_temporal_features(landmarks, previous_landmarks):
-    """Compute frame-to-frame changes."""
     if previous_landmarks is None:
         return np.zeros(15)
     
@@ -504,7 +437,6 @@ def compute_temporal_features(landmarks, previous_landmarks):
     temporal.append(np.std(all_displacements))
     temporal.append(np.max(all_displacements))
     
-    # Pad to 15 features
     while len(temporal) < 15:
         temporal.append(0.0)
     
@@ -512,7 +444,6 @@ def compute_temporal_features(landmarks, previous_landmarks):
 
 
 def extract_geometric_features(landmarks, previous_landmarks=None, confidence=1.0):
-    """Extract 77 geometric features with confidence weighting."""
     if landmarks is None:
         return np.zeros(77)
     
@@ -524,11 +455,8 @@ def extract_geometric_features(landmarks, previous_landmarks=None, confidence=1.
     
     temporal = compute_temporal_features(landmarks, previous_landmarks)
     features.extend(temporal)
-    
-    # Add confidence as a feature
     features.append(confidence)
     
-    # Pad to exactly 77 features
     while len(features) < 77:
         features.append(0.0)
     
@@ -548,12 +476,10 @@ def extract_geometric_features_enhanced(csv_path, dataset_root, output_path="geo
     dlib_dat_path = '/home/cuab/Documents/shape_predictor_81_face_landmarks/shape_predictor_81_face_landmarks.dat'
     predictor = dlib.shape_predictor(dlib_dat_path)
     
-    # Initialize components
     kalman = LandmarkKalmanFilter()
     optical_flow = OpticalFlowFallback()
     mahalanobis_detector = MahalanobisDetector()
     
-    # Load dataset
     dataset = D3Dataset(csv_path)
     loader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, num_workers=2)
     
@@ -562,29 +488,28 @@ def extract_geometric_features_enhanced(csv_path, dataset_root, output_path="geo
     all_confidence_scores = []
     
     print(f"Processing {len(dataset)} videos...")
-    print("Note: Features include Mahalanobis distance (for anomaly detection)")
     
-    # First pass: collect landmarks for Mahalanobis fitting
+    # Collect landmarks for Mahalanobis fitting
     real_landmarks = []
     
     for idx, (frames, label) in enumerate(tqdm(loader, desc="Collecting reference landmarks")):
-        if label.numpy()[0] == 0:  # Real video
-            frames_np = frames.cpu().numpy()
-            for frame in frames_np[:5]:  # Use first 5 frames
-                # Convert frame to HWC if needed
+        if label.numpy()[0] == 0:
+            frames_np = frames.squeeze(0).cpu().numpy()
+            if frames_np.shape[0] != 16:
+                continue
+            for i in range(min(5, frames_np.shape[0])):
+                frame = frames_np[i]
                 if frame.shape[0] == 3:
                     frame_hwc = frame.transpose(1, 2, 0)
                 else:
                     frame_hwc = frame
-                
                 landmarks, _ = detect_face_with_confidence(frame_hwc, detector, predictor)
                 if landmarks is not None and len(landmarks) == 81:
                     real_landmarks.append(landmarks.flatten())
         
-        if len(real_landmarks) >= 100:  # Enough samples
+        if len(real_landmarks) >= 100:
             break
     
-    # Fit Mahalanobis detector
     if len(real_landmarks) > 10:
         mahalanobis_detector.fit(real_landmarks)
         print(f"✅ Mahalanobis detector fitted with {len(real_landmarks)} faces")
@@ -593,15 +518,29 @@ def extract_geometric_features_enhanced(csv_path, dataset_root, output_path="geo
     
     # Main extraction loop
     for idx, (frames, label) in enumerate(tqdm(loader, desc="Extracting features")):
-        frames_np = frames.cpu().numpy()
+        # ============================================================
+        # FIX: Properly handle frame shape
+        # ============================================================
+        frames_tensor = frames.squeeze(0) if frames.shape[0] == 1 else frames
+        frames_np = frames_tensor.cpu().numpy()
         
-        # Extract landmarks with confidence
+        # frames_np should now be (16, 3, 224, 224)
+        if len(frames_np.shape) != 3 and frames_np.shape[0] != 16:
+            print(f"Warning: Unexpected shape {frames_np.shape}, skipping...")
+            all_features.append(np.zeros(154))
+            all_labels.append(label.numpy()[0])
+            all_confidence_scores.append(0.0)
+            continue
+        
         raw_landmarks = []
         confidences = []
         prev_frame = None
         
-        for frame in frames_np:
-            # Convert frame to HWC if needed
+        # Iterate over each frame in the batch
+        for i in range(frames_np.shape[0]):
+            frame = frames_np[i]  # shape: (3, 224, 224)
+            
+            # Convert CHW to HWC for OpenCV
             if frame.shape[0] == 3:
                 frame_hwc = frame.transpose(1, 2, 0)
             else:
@@ -610,14 +549,13 @@ def extract_geometric_features_enhanced(csv_path, dataset_root, output_path="geo
             landmarks, confidence = detect_face_with_confidence(frame_hwc, detector, predictor)
             confidences.append(confidence)
             
-            # If face not detected, use optical flow fallback
             if landmarks is None and prev_frame is not None and len(raw_landmarks) > 0:
                 prev_landmarks = raw_landmarks[-1]
                 if prev_landmarks is not None:
                     landmarks = optical_flow.estimate_landmarks(
                         frame_hwc, prev_frame, prev_landmarks
                     )
-                    confidences[-1] = 0.3  # Lower confidence for estimated
+                    confidences[-1] = 0.3
             
             raw_landmarks.append(landmarks)
             prev_frame = frame_hwc
@@ -650,7 +588,6 @@ def extract_geometric_features_enhanced(csv_path, dataset_root, output_path="geo
         # Aggregate over frames
         video_features = np.array(video_features)
         
-        # Check if any frames had face detection
         if np.all(video_features == 0):
             aggregated = np.zeros(154)
             mahalanobis_score = 0.0
@@ -662,23 +599,20 @@ def extract_geometric_features_enhanced(csv_path, dataset_root, output_path="geo
                     dist = mahalanobis_detector.compute_distance(landmarks)
                     mahalanobis_scores.append(dist)
             
-            # Aggregate features
             geo_mean = video_features.mean(axis=0)
             geo_std = video_features.std(axis=0)
             aggregated = np.concatenate([geo_mean, geo_std])
             
-            # Add Mahalanobis statistics
             if mahalanobis_scores:
                 mahalanobis_score = np.mean(mahalanobis_scores)
             else:
                 mahalanobis_score = 0.0
         
-        # Append features
         all_features.append(aggregated)
         all_labels.append(label.numpy()[0])
         all_confidence_scores.append(mahalanobis_score)
     
-    # Save features and labels
+    # Save
     features_arr = np.array(all_features)
     labels_arr = np.array(all_labels)
     
@@ -690,7 +624,6 @@ def extract_geometric_features_enhanced(csv_path, dataset_root, output_path="geo
     print(f"\n✅ Geometric features saved to: {output_path}")
     print(f"   Feature shape: {features_arr.shape}")
     print(f"   Feature vector length: {features_arr.shape[1]}")
-    print(f"   Mahalanobis scores included as confidence measure")
     
     return features_arr, labels_arr
 
