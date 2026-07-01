@@ -260,7 +260,7 @@ def extract_all_features_fast(csv_path, dataset_root, output_path="full_features
     
     # Load model
     print("Loading XCLIP model (pretrained)...")
-    model = D3Model(encoder_type='XCLIP-16', loss_type='l2').to(device)
+    model = D3Model(encoder_type='CLIP-16', loss_type='l2').to(device)
     
     # Load dataset
     dataset = D3Dataset(csv_path)
