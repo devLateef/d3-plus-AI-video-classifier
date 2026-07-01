@@ -30,7 +30,7 @@ from research.data.dataset import D3Dataset
 
 
 # ============================================================
-# 1. KALMAN FILTER FOR LANDMARK SMOOTHING
+# 1. KALMAN FILTER FOR LANDMARK SMOOTHING (FIXED)
 # ============================================================
 
 class LandmarkKalmanFilter:
@@ -66,21 +66,29 @@ class LandmarkKalmanFilter:
         if landmarks is None:
             return None
         
-        z = landmarks.flatten().astype(np.float32)
+        # IMPORTANT: z must be a column vector (n_dim, 1)
+        z = landmarks.flatten().astype(np.float32).reshape(self.n_dim, 1)
         
         if not self.initialized:
-            self.kf.statePost[:self.n_dim] = z
-            self.kf.statePost[self.n_dim:] = 0
+            # Initialize state: [position, velocity]
+            self.kf.statePost[:self.n_dim] = z.flatten()
+            self.kf.statePost[self.n_dim:] = 0  # Zero initial velocity
             self.initialized = True
             return landmarks
         
+        # Predict
         self.kf.predict()
+        
+        # Update with measurement
         corrected = self.kf.correct(z)
-        smoothed = corrected[:self.n_dim].reshape(self.n_landmarks, 2)
+        
+        # Reshape back to (81, 2)
+        smoothed = corrected[:self.n_dim].flatten().reshape(self.n_landmarks, 2)
         
         return smoothed
     
     def reset(self):
+        """Reset Kalman filter for new video sequence."""
         self.initialized = False
         self.kf.statePost = np.zeros((self.state_dim, 1), dtype=np.float32)
 
@@ -519,14 +527,13 @@ def extract_geometric_features_enhanced(csv_path, dataset_root, output_path="geo
     # Main extraction loop
     for idx, (frames, label) in enumerate(tqdm(loader, desc="Extracting features")):
         # ============================================================
-        # FIX: Properly handle frame shape
+        # Properly handle frame shape
         # ============================================================
         frames_tensor = frames.squeeze(0) if frames.shape[0] == 1 else frames
         frames_np = frames_tensor.cpu().numpy()
         
-        # frames_np should now be (16, 3, 224, 224)
-        if len(frames_np.shape) != 3 and frames_np.shape[0] != 16:
-            print(f"Warning: Unexpected shape {frames_np.shape}, skipping...")
+        # frames_np should be (16, 3, 224, 224)
+        if len(frames_np.shape) != 3 or frames_np.shape[0] != 16:
             all_features.append(np.zeros(154))
             all_labels.append(label.numpy()[0])
             all_confidence_scores.append(0.0)
